@@ -1,3 +1,5 @@
+import Alpaca from '@alpacahq/alpaca-trade-api'
+
 interface AlphaVantageQuote {
   "01. symbol": string
   "02. open": string
@@ -15,6 +17,7 @@ interface AlphaVantageResponse {
   "Global Quote": AlphaVantageQuote
   "Error Message"?: string
   Note?: string
+  Information?: string
 }
 
 export interface StockQuote {
@@ -29,17 +32,133 @@ export interface StockQuote {
   volume: number
 }
 
+export class AlphaVantageError extends Error {
+  constructor(
+    message: string,
+    public readonly isRateLimit: boolean = false,
+    public readonly apiKey?: string
+  ) {
+    super(message)
+    this.name = 'AlphaVantageError'
+  }
+}
+
+export class AlpacaError extends Error {
+  constructor(
+    message: string,
+    public readonly status?: number,
+    public readonly code?: string
+  ) {
+    super(message)
+    this.name = 'AlpacaError'
+  }
+}
+
 export class AlphaVantageClient {
   private apiKey: string
   private baseUrl = "https://www.alphavantage.co/query"
   private cache = new Map<string, { data: StockQuote; timestamp: number }>()
   private readonly CACHE_DURATION = 60000 // 1 minute cache
+  private readonly alpacaBaseUrl = "https://data.alpaca.markets/v2"
+  private readonly alpacaApiKey: string
+  private readonly alpacaSecretKey: string
 
   constructor(apiKey: string) {
+    if (!apiKey) {
+      throw new Error("Alpha Vantage API key is required")
+    }
     this.apiKey = apiKey
+
+    if (!process.env.NEXT_PUBLIC_ALPACA_API_KEY || !process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY) {
+      console.warn("Alpaca API credentials not found. Backup API will not be available.")
+    }
+    this.alpacaApiKey = process.env.NEXT_PUBLIC_ALPACA_API_KEY || ''
+    this.alpacaSecretKey = process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY || ''
+  }
+
+  private async getQuoteFromAlpaca(symbol: string): Promise<StockQuote | null> {
+    if (!this.alpacaApiKey || !this.alpacaSecretKey) {
+      throw new AlpacaError("Alpaca API credentials not configured")
+    }
+
+    try {
+      const headers = {
+        'APCA-API-KEY-ID': this.alpacaApiKey,
+        'APCA-API-SECRET-KEY': this.alpacaSecretKey
+      }
+
+      // Get latest quote
+      const quoteResponse = await fetch(
+        `${this.alpacaBaseUrl}/stocks/${symbol}/quotes/latest`,
+        { headers }
+      )
+      
+      if (!quoteResponse.ok) {
+        const errorData = await quoteResponse.json().catch(() => ({}))
+        throw new AlpacaError(
+          `Alpaca quote API error: ${errorData.message || quoteResponse.statusText}`,
+          quoteResponse.status,
+          errorData.code
+        )
+      }
+
+      const quoteData = await quoteResponse.json()
+      console.log("quote from alpaca", quoteData)
+      
+      if (!quoteData?.quote?.bp) {
+        throw new AlpacaError(`Invalid quote data for ${symbol}`)
+      }
+
+      const quote = quoteData.quote
+
+      // Get latest trade
+      const tradeResponse = await fetch(
+        `${this.alpacaBaseUrl}/stocks/${symbol}/trades/latest`,
+        { headers }
+      )
+
+      if (!tradeResponse.ok) {
+        const errorData = await tradeResponse.json().catch(() => ({}))
+        throw new AlpacaError(
+          `Alpaca trade API error: ${errorData.message || tradeResponse.statusText}`,
+          tradeResponse.status,
+          errorData.code
+        )
+      }
+
+      const tradeData = await tradeResponse.json()
+      if (!tradeData?.trade?.p || !tradeData?.trade?.t) {
+        throw new AlpacaError(`Invalid trade data for ${symbol}`)
+      }
+
+      const trade = tradeData.trade
+
+      return {
+        symbol,
+        price: trade.p,
+        change: trade.p - quote.bp,
+        changePercent: ((trade.p - quote.bp) / quote.bp) * 100,
+        lastUpdated: new Date(trade.t).toISOString(),
+        open: trade.p,
+        high: trade.p,
+        low: trade.p,
+        volume: trade.s
+      }
+    } catch (error) {
+      if (error instanceof AlpacaError) {
+        throw error
+      }
+      throw new AlpacaError(
+        `Error fetching Alpaca data for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
+    }
   }
 
   async getQuote(symbol: string): Promise<StockQuote | null> {
+    if (!symbol) {
+      throw new Error("Symbol is required")
+    }
+
     // Check cache first
     const cached = this.cache.get(symbol)
     if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
@@ -51,28 +170,45 @@ export class AlphaVantageClient {
       const response = await fetch(url)
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new AlphaVantageError(`HTTP error! status: ${response.status}`)
       }
 
       const data: AlphaVantageResponse = await response.json()
 
-      // Check for API errors
-      if (data["Error Message"]) {
-        console.error(`Alpha Vantage API error for ${symbol}:`, data["Error Message"])
-        return null
+      // Check for rate limit error
+      if (data.Information && data.Information.includes("API rate limit")) {
+        const apiKey = data.Information.match(/API key as ([A-Z0-9]+)/)?.[1]
+        console.log("Alpha Vantage rate limit hit, falling back to Alpaca")
+        try {
+          const alpacaQuote = await this.getQuoteFromAlpaca(symbol)
+          if (alpacaQuote) {
+            this.cache.set(symbol, { data: alpacaQuote, timestamp: Date.now() })
+            return alpacaQuote
+          }
+        } catch (alpacaError) {
+          console.error("Alpaca fallback failed:", alpacaError)
+        }
+        throw new AlphaVantageError(data.Information, true, apiKey)
       }
 
-      if (data["Note"]) {
-        console.warn(`Alpha Vantage API note for ${symbol}:`, data["Note"])
-        return null
+      // Check for other API errors
+      if (data["Error Message"]) {
+        throw new AlphaVantageError(data["Error Message"])
+      }
+
+      if (data.Note && data.Note.includes("API call frequency")) {
+        throw new AlphaVantageError(data.Note, true)
       }
 
       if (!data["Global Quote"]) {
-        console.error(`No quote data returned for ${symbol}`)
-        return null
+        throw new AlphaVantageError(`No quote data returned for ${symbol}`)
       }
 
       const quote = data["Global Quote"]
+      if (!quote["05. price"]) {
+        throw new AlphaVantageError(`Invalid quote data for ${symbol}`)
+      }
+
       const stockQuote: StockQuote = {
         symbol: quote["01. symbol"],
         price: Number.parseFloat(quote["05. price"]),
@@ -87,34 +223,52 @@ export class AlphaVantageClient {
 
       // Cache the result
       this.cache.set(symbol, { data: stockQuote, timestamp: Date.now() })
-
       return stockQuote
+
     } catch (error) {
-      console.error(`Error fetching quote for ${symbol}:`, error)
-      return null
+      if (error instanceof AlphaVantageError) {
+        throw error
+      }
+      throw new AlphaVantageError(
+        `Error fetching quote for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      )
     }
   }
 
   async getMultipleQuotes(symbols: string[]): Promise<Map<string, StockQuote>> {
+    if (!symbols.length) {
+      return new Map()
+    }
+
     const quotes = new Map<string, StockQuote>()
+    const errors: (AlphaVantageError | AlpacaError)[] = []
 
-    // Process in batches to avoid rate limiting
-    const batchSize = 5
-    for (let i = 0; i < symbols.length; i += batchSize) {
-      const batch = symbols.slice(i, i + batchSize)
-      const promises = batch.map((symbol) => this.getQuote(symbol))
-      const results = await Promise.all(promises)
-
-      results.forEach((quote, index) => {
-        if (quote) {
-          quotes.set(batch[index], quote)
+    // Process symbols in batches of 5 to avoid rate limits
+    for (let i = 0; i < symbols.length; i += 5) {
+      const batch = symbols.slice(i, i + 5)
+      const promises = batch.map(async (symbol) => {
+        try {
+          const quote = await this.getQuote(symbol)
+          if (quote) {
+            quotes.set(symbol, quote)
+          }
+        } catch (error) {
+          if (error instanceof AlphaVantageError || error instanceof AlpacaError) {
+            errors.push(error)
+          }
         }
       })
-
-      // Add delay between batches to respect rate limits
-      if (i + batchSize < symbols.length) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+      await Promise.all(promises)
+      
+      // Add a small delay between batches
+      if (i + 5 < symbols.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
+    }
+
+    // Log any errors that occurred
+    if (errors.length > 0) {
+      console.error("Errors occurred while fetching quotes:", errors)
     }
 
     return quotes

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -18,20 +18,34 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { PortfolioValueWidget } from "./portfolio-value-widget"
 import { SharesAtRiskWidget } from "./shares-at-risk-widget"
 import { RobinhoodStyleChart } from "./robinhood-style-chart"
-import { calculatePortfolioValue, generatePortfolioPerformance } from "@/utils/portfolio-calculations"
+import { calculatePortfolioValue, generatePortfolioPerformance, analyzeCoveredCallSharePositions } from "@/utils/portfolio-calculations"
+import { CoveredCallSharesTable } from "./covered-call-shares-table"
+import { createClient } from "@/lib/supabase/client"
+import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
 }
 
+interface StockPosition {
+  id: string
+  symbol: string
+  quantity: number
+  cost_basis: number
+  current_price: number
+  status: string
+  portfolio_id: string
+}
+
 export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("open")
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null)
-  const { legs, loading, error, refetch } = useLegsData()
+  const { legs, loading, error, refetch: refetchLegs } = useLegsData()
 
   // Add state for portfolio calculations
   const [portfolioValue, setPortfolioValue] = useState<any>(null)
   const [stockQuotes, setStockQuotes] = useState<Map<string, any>>(new Map())
+  const [stockPositions, setStockPositions] = useState<StockPosition[]>([])
 
   // Keyboard shortcuts
   useKeyboardShortcuts([
@@ -58,10 +72,58 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     },
   ])
 
-  const handleContractAdded = () => {
-    setActiveTab("open")
-    refetch()
+  // Add function to fetch stock positions
+  const fetchStockPositions = async () => {
+    const supabase = createClient()
+    const { data: positions, error } = await supabase
+      .from("positions")
+      .select("*")
+      .eq("status", "STOCK")
+    if (error) {
+      console.error("Error fetching stock positions:", error)
+      return
+    }
+    if (positions) {
+      setStockPositions(positions)
+    }
   }
+
+  // Add function to fetch stock quotes
+  const fetchStockQuotes = async () => {
+    const alphaVantage = getAlphaVantageClient()
+    const symbols = [...new Set([...stockPositions.map(pos => pos.symbol), ...legs.map(leg => leg.symbol)])]
+    const quotes = await alphaVantage.getMultipleQuotes(symbols)
+    setStockQuotes(quotes)
+  }
+
+  // Create a combined refetch function that updates everything
+  const refetch = async () => {
+    await refetchLegs()
+    await fetchStockPositions()
+    await fetchStockQuotes()
+  }
+
+  // Update handleContractAdded to use the combined refetch
+  const handleContractAdded = async () => {
+    setActiveTab("open")
+    await refetch()
+  }
+
+  // Fetch stock positions and quotes on initial load
+  useEffect(() => {
+    fetchStockPositions()
+    fetchStockQuotes()
+  }, [])
+
+  // Add effect to refetch stock positions when legs change
+  useEffect(() => {
+    fetchStockPositions()
+  }, [legs])
+
+  // Add effect to refetch quotes when stock positions change
+  useEffect(() => {
+    fetchStockQuotes()
+  }, [stockPositions])
 
   // Helper function to check if a contract is expired
   const isExpired = (expiry: Date): boolean => {
@@ -71,9 +133,9 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   }
 
   // Separate legs into open, expired, and closed
-  const openLegs = legs.filter((leg) => !leg.close_date && !isExpired(leg.expiry))
-  const expiredLegs = legs.filter((leg) => !leg.close_date && isExpired(leg.expiry))
-  const closedLegs = legs.filter((leg) => leg.close_date)
+  const openLegs = legs.filter((leg) => !leg.closeDate && !isExpired(leg.expiry))
+  const expiredLegs = legs.filter((leg) => !leg.closeDate && isExpired(leg.expiry))
+  const closedLegs = legs.filter((leg) => leg.closeDate)
 
   // Combine expired and closed legs for the closed tab
   const allClosedLegs = [...closedLegs, ...expiredLegs]
@@ -134,8 +196,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     // Mock stock positions for now - in real app, fetch from database
     const stockPositions: any[] = []
 
-    const portfolioVal = calculatePortfolioValue(legs, stockPositions, stockQuotes, 10000)
-    const performanceData = generatePortfolioPerformance(legs, stockPositions, 10000)
+    const portfolioVal = calculatePortfolioValue(legs, stockPositions, stockQuotes, 0)
+    const performanceData = generatePortfolioPerformance(legs, stockPositions, 0)
 
     return { portfolioVal, performanceData }
   }, [legs, stockQuotes])
@@ -172,6 +234,86 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
     return data
   }, [legs])
+
+  // Calculate covered call share positions directly from database positions
+  const coveredCallSharePositions = useMemo(() => {
+    return stockPositions.map(position => {
+      const quote = stockQuotes.get(position.symbol)
+      if (!quote) return null
+
+      // Find any covered calls for this position
+      const coveredCalls = legs.filter(
+        leg => leg.symbol === position.symbol && 
+        leg.type === "CALL" && 
+        leg.side === "SELL" && 
+        !leg.closeDate && 
+        !leg.is_assigned
+      )
+
+      const coveredCallCount = coveredCalls.reduce((sum, call) => sum + call.contracts, 0)
+      const coveredCallStrikes = coveredCalls.map(call => call.strike)
+      const coveredCallExpiries = coveredCalls.map(call => call.expiry)
+      const totalPremiumCollected = coveredCalls.reduce(
+        (sum, call) => sum + call.open_price * call.contracts * 100, 
+        0
+      )
+
+      // Calculate market value and P&L
+      const marketValue = position.quantity * quote.price
+      const totalCost = position.quantity * position.cost_basis
+      const unrealizedPL = marketValue - totalCost
+      const unrealizedPLPercent = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0
+
+      // Calculate potential profit if assigned
+      const potentialProfitIfAssigned = coveredCalls.reduce((sum, call) => {
+        const sharesCovered = call.contracts * 100
+        const profitFromAssignment = (call.strike - position.cost_basis) * sharesCovered
+        const premiumCollected = call.open_price * sharesCovered
+        return sum + profitFromAssignment + premiumCollected
+      }, 0)
+
+      // Calculate average days to expiry
+      const now = new Date()
+      const daysToExpiry = coveredCallExpiries.map(expiry => 
+        Math.max(0, Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+      )
+      const averageDaysToExpiry = daysToExpiry.length > 0 
+        ? daysToExpiry.reduce((sum, days) => sum + days, 0) / daysToExpiry.length 
+        : 0
+
+      // Calculate assignment risk
+      const assignmentRisks = coveredCalls.map(call => {
+        const daysToExpiry = Math.max(0, Math.ceil((call.expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+        const isITM = quote.price > call.strike
+        const moneyness = isITM ? (quote.price - call.strike) / call.strike : 0
+
+        if (daysToExpiry === 0) return isITM ? 95 : 5
+        if (isITM) return Math.min(90, moneyness * 100 + 40 * (1 - Math.min(1, daysToExpiry / 30)))
+        const otmPercent = ((call.strike - quote.price) / quote.price) * 100
+        return Math.max(5, 25 * Math.exp(-otmPercent / 8))
+      })
+      const averageAssignmentRisk = assignmentRisks.length > 0
+        ? assignmentRisks.reduce((sum, risk) => sum + risk, 0) / assignmentRisks.length
+        : 0
+
+      return {
+        symbol: position.symbol,
+        quantity: position.quantity,
+        costBasis: position.cost_basis,
+        currentPrice: quote.price,
+        marketValue,
+        unrealizedPL,
+        unrealizedPLPercent,
+        coveredCallCount,
+        coveredCallStrikes,
+        coveredCallExpiries,
+        totalPremiumCollected,
+        potentialProfitIfAssigned,
+        averageDaysToExpiry,
+        averageAssignmentRisk,
+      }
+    }).filter((pos): pos is NonNullable<typeof pos> => pos !== null)
+  }, [stockPositions, stockQuotes, legs])
 
   if (loading) {
     return (
@@ -385,6 +527,12 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   )}
                 </CardContent>
               </Card>
+
+              <CoveredCallSharesTable 
+                positions={coveredCallSharePositions}
+                loading={loading}
+                onRefresh={refetch}
+              />
             </TabsContent>
 
             <TabsContent value="closed" className="space-y-4">
@@ -412,7 +560,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                       </TableHeader>
                       <TableBody>
                         {allClosedLegs.map((leg) => {
-                          const isExpiredContract = !leg.close_date && isExpired(leg.expiry)
+                          const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
                           const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
                           const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
                           const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium

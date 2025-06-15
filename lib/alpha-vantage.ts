@@ -126,7 +126,7 @@ let alphaVantageClient: AlphaVantageClient | null = null
 
 export function getAlphaVantageClient(): AlphaVantageClient {
   if (!alphaVantageClient) {
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY
+    const apiKey = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY
     if (!apiKey) {
       throw new Error("ALPHA_VANTAGE_API_KEY environment variable is required")
     }

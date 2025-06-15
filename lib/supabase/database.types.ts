@@ -138,6 +138,7 @@ export interface Database {
           commissions: number
           is_assigned: boolean | null
           is_exercised: boolean | null
+          share_cost_basis: number | null
           created_at: string
           updated_at: string
         }
@@ -156,6 +157,7 @@ export interface Database {
           commissions?: number
           is_assigned?: boolean | null
           is_exercised?: boolean | null
+          share_cost_basis?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -174,6 +176,7 @@ export interface Database {
           commissions?: number
           is_assigned?: boolean | null
           is_exercised?: boolean | null
+          share_cost_basis?: number | null
           created_at?: string
           updated_at?: string
         }

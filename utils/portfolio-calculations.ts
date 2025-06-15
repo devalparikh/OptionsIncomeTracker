@@ -70,6 +70,23 @@ export interface PortfolioPerformancePoint {
   cashValue: number
 }
 
+export interface CoveredCallSharePosition {
+  symbol: string
+  quantity: number
+  costBasis: number
+  currentPrice: number
+  marketValue: number
+  unrealizedPL: number
+  unrealizedPLPercent: number
+  coveredCallCount: number // Number of covered calls against these shares
+  coveredCallStrikes: number[] // List of strike prices for the covered calls
+  coveredCallExpiries: Date[] // List of expiry dates for the covered calls
+  totalPremiumCollected: number // Total premium collected from covered calls
+  potentialProfitIfAssigned: number // Potential profit if all calls are assigned
+  averageDaysToExpiry: number // Average days to expiry across all covered calls
+  averageAssignmentRisk: number // Average assignment risk across all covered calls
+}
+
 export function calculateSharesAtRisk(
   legs: LegWithPosition[],
   quotes: Map<string, StockQuote>,
@@ -79,7 +96,7 @@ export function calculateSharesAtRisk(
 
   // Find all open PUT positions that could be assigned (new shares)
   const openPuts = legs.filter(
-    (leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.close_date && !leg.is_assigned,
+    (leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned,
   )
 
   for (const leg of openPuts) {
@@ -121,7 +138,7 @@ export function calculateSharesAtRisk(
 
   // Find all open CALL positions that could result in shares being called away
   const openCalls = legs.filter(
-    (leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.close_date && !leg.is_assigned,
+    (leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned,
   )
 
   for (const leg of openCalls) {
@@ -194,7 +211,7 @@ export function analyzeCoveredCallPositions(
 
   // Add call legs
   legs
-    .filter((leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.close_date && !leg.is_assigned)
+    .filter((leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned)
     .forEach((call) => {
       const group = symbolGroups.get(call.symbol)
       if (group) {
@@ -249,6 +266,106 @@ export function analyzeCoveredCallPositions(
   return coveredCalls
 }
 
+export function analyzeCoveredCallSharePositions(
+  legs: LegWithPosition[],
+  stockPositions: any[],
+  quotes: Map<string, StockQuote>,
+): CoveredCallSharePosition[] {
+  const sharePositions: CoveredCallSharePosition[] = []
+
+  // Group legs by symbol
+  const symbolGroups = new Map<string, { stock?: any; calls: LegWithPosition[] }>()
+
+  // Add stock positions
+  stockPositions.forEach((stock) => {
+    symbolGroups.set(stock.symbol, { stock, calls: [] })
+  })
+
+  // Add call legs
+  legs
+    .filter((leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned)
+    .forEach((call) => {
+      const group = symbolGroups.get(call.symbol)
+      if (group) {
+        group.calls.push(call)
+      }
+    })
+
+  // Process each symbol group
+  symbolGroups.forEach((group, symbol) => {
+    if (!group.stock) return // Only skip if no stock position
+
+    const quote = quotes.get(symbol)
+    if (!quote) return
+
+    const stock = group.stock
+    const calls = group.calls
+
+    // Calculate covered call metrics
+    const coveredCallCount = calls.reduce((sum, call) => sum + call.contracts, 0)
+    const coveredCallStrikes = calls.map(call => call.strike)
+    const coveredCallExpiries = calls.map(call => call.expiry)
+    const totalPremiumCollected = calls.reduce((sum, call) => sum + call.open_price * call.contracts * 100, 0)
+
+    // Calculate average days to expiry and assignment risk
+    const now = new Date()
+    const daysToExpiry = coveredCallExpiries.map(expiry => 
+      Math.max(0, Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+    )
+    const averageDaysToExpiry = daysToExpiry.length > 0 
+      ? daysToExpiry.reduce((sum, days) => sum + days, 0) / daysToExpiry.length 
+      : 0
+
+    // Calculate assignment risk for each call
+    const assignmentRisks = calls.map(call => {
+      const daysToExpiry = Math.max(0, Math.ceil((call.expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+      const isITM = quote.price > call.strike
+      const moneyness = isITM ? (quote.price - call.strike) / call.strike : 0
+
+      if (daysToExpiry === 0) return isITM ? 95 : 5
+      if (isITM) return Math.min(90, moneyness * 100 + 40 * (1 - Math.min(1, daysToExpiry / 30)))
+      const otmPercent = ((call.strike - quote.price) / quote.price) * 100
+      return Math.max(5, 25 * Math.exp(-otmPercent / 8))
+    })
+    const averageAssignmentRisk = assignmentRisks.length > 0
+      ? assignmentRisks.reduce((sum, risk) => sum + risk, 0) / assignmentRisks.length
+      : 0
+
+    // Calculate potential profit if assigned
+    const potentialProfitIfAssigned = calls.reduce((sum, call) => {
+      const sharesCovered = call.contracts * 100
+      const profitFromAssignment = (call.strike - stock.cost_basis) * sharesCovered
+      const premiumCollected = call.open_price * sharesCovered
+      return sum + profitFromAssignment + premiumCollected
+    }, 0)
+
+    // Calculate market value and P&L
+    const marketValue = stock.quantity * quote.price
+    const totalCost = stock.quantity * stock.cost_basis
+    const unrealizedPL = marketValue - totalCost
+    const unrealizedPLPercent = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0
+
+    sharePositions.push({
+      symbol,
+      quantity: stock.quantity,
+      costBasis: stock.cost_basis,
+      currentPrice: quote.price,
+      marketValue,
+      unrealizedPL,
+      unrealizedPLPercent,
+      coveredCallCount,
+      coveredCallStrikes,
+      coveredCallExpiries,
+      totalPremiumCollected,
+      potentialProfitIfAssigned,
+      averageDaysToExpiry,
+      averageAssignmentRisk,
+    })
+  })
+
+  return sharePositions
+}
+
 export function calculatePortfolioValue(
   legs: LegWithPosition[],
   stockPositions: any[],
@@ -262,6 +379,14 @@ export function calculatePortfolioValue(
   // Analyze covered calls first
   const coveredCallPositions = analyzeCoveredCallPositions(legs, stockPositions, quotes)
   const coveredCallMap = new Map(coveredCallPositions.map((cc) => [cc.symbol, cc]))
+
+  // Calculate CSP collateral value first
+  const collateralValue = legs
+    .filter((leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned)
+    .reduce((sum, leg) => sum + leg.strike * 100 * leg.contracts, 0)
+
+  // Adjust cash balance to account for CSP collateral
+  const adjustedCashBalance = cashBalance - collateralValue
 
   for (const position of stockPositions) {
     const quote = quotes.get(position.symbol)
@@ -293,7 +418,7 @@ export function calculatePortfolioValue(
 
   // Calculate options value
   let optionsValue = 0
-  const openLegs = legs.filter((leg) => !leg.close_date && !leg.is_assigned)
+  const openLegs = legs.filter((leg) => !leg.closeDate && !leg.is_assigned)
 
   for (const leg of openLegs) {
     const quote = quotes.get(leg.symbol)
@@ -314,16 +439,12 @@ export function calculatePortfolioValue(
     optionsValue += leg.side === "SELL" ? -positionValue : positionValue
   }
 
-  // Calculate collateral value (cash tied up in puts, but not covered calls since we own the shares)
-  const collateralValue = legs
-    .filter((leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.close_date && !leg.is_assigned)
-    .reduce((sum, leg) => sum + leg.strike * 100 * leg.contracts, 0)
-
   // Calculate shares at risk (including both PUT assignments and CALL assignments)
   const sharesAtRisk = calculateSharesAtRisk(legs, quotes, stockPositions)
 
-  const totalEquity = totalSharesValue + optionsValue
-  const totalPortfolioValue = cashBalance + totalEquity
+  // Calculate total equity including allocated funds
+  const totalEquity = totalSharesValue + optionsValue + collateralValue
+  const totalPortfolioValue = adjustedCashBalance + totalEquity
 
   // Calculate returns (simplified - would need historical data for accurate calculation)
   const totalPremiumCollected = legs.reduce(
@@ -332,13 +453,13 @@ export function calculatePortfolioValue(
   )
 
   const totalStockCost = sharesPositions.reduce((sum, pos) => sum + pos.quantity * pos.costBasis, 0)
-  const initialInvestment = Math.max(10000, totalStockCost) // Use actual stock cost or default
+  const initialInvestment = Math.max(10000, totalStockCost + collateralValue) // Include collateral in initial investment
 
   const totalReturn = totalEquity - initialInvestment + totalPremiumCollected
   const totalReturnPercent = initialInvestment > 0 ? (totalReturn / initialInvestment) * 100 : 0
 
   return {
-    totalCash: cashBalance,
+    totalCash: adjustedCashBalance,
     totalEquity,
     totalPortfolioValue,
     sharesValue: totalSharesValue,
@@ -380,7 +501,7 @@ export function generatePortfolioPerformance(
   // Combine and sort all transactions by date
   const allTransactions: Array<{
     date: Date
-    type: "OPTION" | "STOCK"
+    type: "OPTION" | "STOCK" | "COLLATERAL"
     value: number
     leg?: LegWithPosition
     stock?: any
@@ -395,6 +516,16 @@ export function generatePortfolioPerformance(
       value: premium,
       leg,
     })
+
+    // Add collateral transaction for CSPs
+    if (leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned) {
+      allTransactions.push({
+        date: leg.openDate,
+        type: "COLLATERAL",
+        value: -leg.strike * 100 * leg.contracts, // Negative because it's cash being set aside
+        leg,
+      })
+    }
   })
 
   // Add stock transactions (simplified - assuming all bought at once)
@@ -413,6 +544,7 @@ export function generatePortfolioPerformance(
   let cumulativeValue = startingValue
   let cumulativeStockValue = 0
   let cumulativeOptionsValue = 0
+  let cumulativeCollateralValue = 0
   let previousValue = startingValue
 
   // Add starting point
@@ -430,16 +562,24 @@ export function generatePortfolioPerformance(
 
   // Process transactions in chronological order
   allTransactions.forEach((transaction, index) => {
-    if (transaction.type === "OPTION") {
-      cumulativeOptionsValue += transaction.value
-    } else {
-      cumulativeStockValue += Math.abs(transaction.value) // Stock value (positive)
-      cumulativeValue += transaction.value // Cash impact (negative for purchases)
+    switch (transaction.type) {
+      case "OPTION":
+        cumulativeOptionsValue += transaction.value
+        break
+      case "STOCK":
+        cumulativeStockValue += Math.abs(transaction.value) // Stock value (positive)
+        cumulativeValue += transaction.value // Cash impact (negative for purchases)
+        break
+      case "COLLATERAL":
+        cumulativeCollateralValue += Math.abs(transaction.value) // Collateral value (positive)
+        cumulativeValue += transaction.value // Cash impact (negative for collateral)
+        break
     }
 
     cumulativeValue =
       startingValue +
       cumulativeOptionsValue +
+      cumulativeCollateralValue +
       (cumulativeStockValue - Math.abs(safeStockPositions.reduce((sum, s) => sum + s.quantity * s.cost_basis, 0)))
 
     // Add point every few transactions or at the end
@@ -458,7 +598,7 @@ export function generatePortfolioPerformance(
         dayChangePercent,
         sharesValue: cumulativeStockValue,
         optionsValue: cumulativeOptionsValue,
-        cashValue: startingValue - Math.abs(safeStockPositions.reduce((sum, s) => sum + s.quantity * s.cost_basis, 0)),
+        cashValue: startingValue - Math.abs(safeStockPositions.reduce((sum, s) => sum + s.quantity * s.cost_basis, 0)) - cumulativeCollateralValue,
       })
 
       previousValue = cumulativeValue

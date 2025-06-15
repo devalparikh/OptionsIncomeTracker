@@ -2,6 +2,7 @@
 
 import { createServerClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 
 export async function createLeg(legData: {
   symbol: string
@@ -13,9 +14,11 @@ export async function createLeg(legData: {
   open_price: number
   contracts: number
   commissions?: number
+  share_cost_basis?: number
 }) {
   try {
     const supabase = await createServerClient()
+    const alphaVantage = getAlphaVantageClient()
 
     // Get the authenticated user
     const {
@@ -118,10 +121,19 @@ export async function createLeg(legData: {
       portfolio = portfolios[0]
     }
 
+    // Get current stock price for covered calls
+    let currentPrice = null
+    if (legData.type === "CALL" && legData.side === "SELL") {
+      const quote = await alphaVantage.getQuote(legData.symbol)
+      if (quote) {
+        currentPrice = quote.price
+      }
+    }
+
     // Check if position exists for this symbol
     let { data: position, error: positionSelectError } = await supabase
       .from("positions")
-      .select("id")
+      .select("id, quantity, cost_basis")
       .eq("portfolio_id", portfolio.id)
       .eq("symbol", legData.symbol)
       .maybeSingle()
@@ -131,24 +143,78 @@ export async function createLeg(legData: {
       throw new Error("Error checking existing positions")
     }
 
-    // Create position if it doesn't exist
-    if (!position) {
-      const { data: newPosition, error: positionError } = await supabase
-        .from("positions")
-        .insert({
-          portfolio_id: portfolio.id,
-          symbol: legData.symbol,
-          status: legData.type,
-          quantity: legData.contracts,
-        })
-        .select("id")
-        .single()
+    // For covered calls, calculate new quantity and weighted average cost basis
+    if (legData.type === "CALL" && legData.side === "SELL") {
+      const newQuantity = legData.contracts * 100
+      
+      if (!position) {
+        // Create new position if it doesn't exist
+        const { data: newPosition, error: positionError } = await supabase
+          .from("positions")
+          .insert({
+            portfolio_id: portfolio.id,
+            symbol: legData.symbol,
+            status: "STOCK",
+            quantity: newQuantity,
+            cost_basis: legData.share_cost_basis,
+            current_price: currentPrice,
+          })
+          .select("id")
+          .single()
 
-      if (positionError) {
-        console.error("Position creation error:", positionError)
-        throw new Error(`Failed to create position: ${positionError.message}`)
+        if (positionError) {
+          console.error("Position creation error:", positionError)
+          throw new Error(`Failed to create position: ${positionError.message}`)
+        }
+        position = newPosition
+      } else {
+        // Update existing position with weighted average cost basis
+        const existingQuantity = position.quantity || 0
+        const existingCostBasis = position.cost_basis || 0
+        const totalQuantity = existingQuantity + newQuantity
+        
+        // Calculate weighted average cost basis
+        const weightedCostBasis = existingQuantity > 0
+          ? ((existingQuantity * existingCostBasis) + (newQuantity * (legData.share_cost_basis || 0))) / totalQuantity
+          : legData.share_cost_basis
+
+        const { error: updateError } = await supabase
+          .from("positions")
+          .update({
+            status: "STOCK",
+            quantity: totalQuantity,
+            cost_basis: weightedCostBasis,
+            current_price: currentPrice,
+          })
+          .eq("id", position.id)
+
+        if (updateError) {
+          console.error("Position update error:", updateError)
+          throw new Error(`Failed to update position: ${updateError.message}`)
+        }
       }
-      position = newPosition
+    } else {
+      // Handle non-covered call positions
+      if (!position) {
+        const { data: newPosition, error: positionError } = await supabase
+          .from("positions")
+          .insert({
+            portfolio_id: portfolio.id,
+            symbol: legData.symbol,
+            status: legData.type,
+            quantity: legData.contracts,
+            cost_basis: null,
+            current_price: null,
+          })
+          .select("id")
+          .single()
+
+        if (positionError) {
+          console.error("Position creation error:", positionError)
+          throw new Error(`Failed to create position: ${positionError.message}`)
+        }
+        position = newPosition
+      }
     }
 
     // Create the leg
@@ -162,6 +228,7 @@ export async function createLeg(legData: {
       open_price: legData.open_price,
       contracts: legData.contracts,
       commissions: legData.commissions || 0,
+      share_cost_basis: legData.share_cost_basis || null,
     })
 
     if (legError) {

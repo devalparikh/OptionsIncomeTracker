@@ -136,6 +136,7 @@ export async function createLeg(legData: {
       .select("id, quantity, cost_basis")
       .eq("portfolio_id", portfolio.id)
       .eq("symbol", legData.symbol)
+      .eq("status", legData.type === "CALL" && legData.side === "SELL" ? "STOCK" : legData.type)
       .maybeSingle()
 
     if (positionSelectError) {

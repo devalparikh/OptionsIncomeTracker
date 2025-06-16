@@ -23,6 +23,7 @@ import { CoveredCallSharesTable } from "./covered-call-shares-table"
 import { createClient } from "@/lib/supabase/client"
 import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 import { getStockQuotes } from "@/app/actions/market-data"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -41,6 +42,7 @@ interface StockPosition {
 export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("open")
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null)
+  const [isContractModalOpen, setIsContractModalOpen] = useState(false)
   const { legs, loading, error, refetch: refetchLegs } = useLegsData()
 
   // Add state for portfolio calculations
@@ -50,15 +52,6 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
   // Keyboard shortcuts
   useKeyboardShortcuts([
-    {
-      key: "n",
-      ctrlKey: true,
-      callback: () => {
-        setActiveTab("add")
-        onNewEntryRequest?.()
-      },
-      description: "Create new contract entry",
-    },
     {
       key: "d",
       ctrlKey: true,
@@ -107,9 +100,9 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     await fetchStockQuotes()
   }
 
-  // Update handleContractAdded to use the combined refetch
+  // Update handleContractAdded to close modal
   const handleContractAdded = async () => {
-    setActiveTab("open")
+    setIsContractModalOpen(false)
     await refetch()
   }
 
@@ -448,21 +441,40 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="bg-muted/50 backdrop-blur-sm border border-border/50">
-              <TabsTrigger value="open" className="data-[state=active]:bg-background/80">
-                Open Positions ({openLegs.length})
-              </TabsTrigger>
-              <TabsTrigger value="closed" className="data-[state=active]:bg-background/80">
-                Closed/Expired ({allClosedLegs.length})
-              </TabsTrigger>
-              <TabsTrigger value="market" className="data-[state=active]:bg-background/80">
-                <Activity className="h-4 w-4 mr-1" />
-                Market Analysis
-              </TabsTrigger>
-              <TabsTrigger value="add" className="data-[state=active]:bg-background/80">
-                Add Contract
-              </TabsTrigger>
-            </TabsList>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none md:hidden" />
+              <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none md:hidden" />
+              <TabsList className="bg-muted/50 backdrop-blur-sm border border-border/50 overflow-x-auto flex-nowrap md:flex-wrap md:justify-start scrollbar-none">
+                <TabsTrigger 
+                  value="open" 
+                  className="data-[state=active]:bg-background/80 whitespace-nowrap flex-shrink-0"
+                >
+                  <span className="hidden sm:inline">Open Positions</span>
+                  <span className="sm:hidden">Open</span>
+                  <Badge variant="secondary" className="ml-2 text-xs font-mono">
+                    {openLegs.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="closed" 
+                  className="data-[state=active]:bg-background/80 whitespace-nowrap flex-shrink-0"
+                >
+                  <span className="hidden sm:inline">Closed/Expired</span>
+                  <span className="sm:hidden">Closed</span>
+                  <Badge variant="secondary" className="ml-2 text-xs font-mono">
+                    {allClosedLegs.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="market" 
+                  className="data-[state=active]:bg-background/80 whitespace-nowrap flex-shrink-0"
+                >
+                  <Activity className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">Market Analysis</span>
+                  <span className="sm:hidden">Market</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
             <TabsContent value="open" className="space-y-4">
               <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
@@ -476,58 +488,64 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                       No open positions. Add a new contract to get started.
                     </div>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-border/50">
-                          <TableHead className="text-muted-foreground">Symbol</TableHead>
-                          <TableHead className="text-muted-foreground">Type</TableHead>
-                          <TableHead className="text-muted-foreground">Strike</TableHead>
-                          <TableHead className="text-muted-foreground">Expiry</TableHead>
-                          <TableHead className="text-muted-foreground">Open Price</TableHead>
-                          <TableHead className="text-muted-foreground">Contracts</TableHead>
-                          <TableHead className="text-muted-foreground">DTE</TableHead>
-                          <TableHead className="text-muted-foreground">Status</TableHead>
-                          <TableHead className="text-muted-foreground">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {openLegs.map((leg) => {
-                          const dte = Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-
-                          return (
-                            <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
-                              <TableCell className="font-medium text-foreground">{leg.symbol}</TableCell>
-                              <TableCell>
-                                <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
-                                  {leg.side} {leg.type}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-foreground">${leg.strike}</TableCell>
-                              <TableCell className="text-foreground">{leg.expiry.toLocaleDateString()}</TableCell>
-                              <TableCell className="text-blue-600 font-medium">${leg.open_price.toFixed(2)}</TableCell>
-                              <TableCell className="text-foreground">{leg.contracts}</TableCell>
-                              <TableCell>
-                                <Badge variant={dte <= 7 ? "destructive" : dte <= 21 ? "secondary" : "outline"}>
-                                  {dte}d
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">Active</Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setSelectedPositionId(leg.position_id)}
-                                >
-                                  Analyze
-                                </Button>
-                              </TableCell>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none md:hidden" />
+                      <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none md:hidden" />
+                      <div className="overflow-x-auto scrollbar-none">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-border/50">
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Symbol</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Type</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Strike</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Expiry</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Open Price</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Contracts</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">DTE</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Status</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Actions</TableHead>
                             </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {openLegs.map((leg) => {
+                              const dte = Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+
+                              return (
+                                <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
+                                  <TableCell className="font-medium text-foreground whitespace-nowrap">{leg.symbol}</TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
+                                      {leg.side} {leg.type}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">${leg.strike}</TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">{leg.expiry.toLocaleDateString()}</TableCell>
+                                  <TableCell className="text-blue-600 font-medium whitespace-nowrap">${leg.open_price.toFixed(2)}</TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">{leg.contracts}</TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Badge variant={dte <= 7 ? "destructive" : dte <= 21 ? "secondary" : "outline"}>
+                                      {dte}d
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Badge variant="outline">Active</Badge>
+                                  </TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setSelectedPositionId(leg.position_id)}
+                                    >
+                                      Analyze
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -549,94 +567,88 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   {allClosedLegs.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">No closed or expired positions yet.</div>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-border/50">
-                          <TableHead className="text-muted-foreground">Symbol</TableHead>
-                          <TableHead className="text-muted-foreground">Type</TableHead>
-                          <TableHead className="text-muted-foreground">Strike</TableHead>
-                          <TableHead className="text-muted-foreground">Open Date</TableHead>
-                          <TableHead className="text-muted-foreground">Close/Expiry Date</TableHead>
-                          <TableHead className="text-muted-foreground">Days Open</TableHead>
-                          <TableHead className="text-muted-foreground">Net P/L</TableHead>
-                          <TableHead className="text-muted-foreground">ROI/Day</TableHead>
-                          <TableHead className="text-muted-foreground">Monthly ROI</TableHead>
-                          <TableHead className="text-muted-foreground">ROI</TableHead>
-                          <TableHead className="text-muted-foreground">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {allClosedLegs.map((leg) => {
-                          const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
-                          const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
-                          const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
-                          const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium
-                          const collateral =
-                            leg.type === "PUT"
-                              ? calculateCapitalAtRisk(leg.strike, leg.contracts)
-                              : leg.open_price * 100 * leg.contracts
-                          // TODO: Properly handle ROI calculations for covered calls
-                          // Currently hiding ROI for covered calls as it requires share cost basis
-                          // and proper handling of assignment scenarios
-                          const roi = leg.type === "PUT" ? calculateLegROI(netPL, collateral) : 0
-                          const closeOrExpiryDate = leg.closeDate || leg.expiry
-                          const daysOpen = Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
-                          const roiPerDay = leg.type === "PUT" && daysOpen > 0 ? roi / daysOpen : 0
-                          const monthlyROI = leg.type === "PUT" ? (daysOpen < 30 ? roiPerDay * 30 : roi) : 0
-
-                          return (
-                            <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
-                              <TableCell className="font-medium text-foreground">{leg.symbol}</TableCell>
-                              <TableCell>
-                                <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
-                                  {leg.side} {leg.type}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-foreground">${leg.strike}</TableCell>
-                              <TableCell className="text-foreground">{leg.openDate.toLocaleDateString()}</TableCell>
-                              <TableCell className="text-foreground">
-                                {leg.closeDate?.toLocaleDateString() || leg.expiry.toLocaleDateString()}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">{daysOpen}d</Badge>
-                              </TableCell>
-                              <TableCell
-                                className={netPL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}
-                              >
-                                ${netPL.toFixed(2)}
-                              </TableCell>
-                              <TableCell
-                                className={leg.type === "PUT" ? (roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
-                              >
-                                {leg.type === "PUT" ? `${roiPerDay.toFixed(2)}%/d` : "-"}
-                              </TableCell>
-                              <TableCell
-                                className={leg.type === "PUT" ? (monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
-                              >
-                                {leg.type === "PUT" ? (
-                                  <>
-                                    {monthlyROI.toFixed(2)}%
-                                    {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
-                                  </>
-                                ) : (
-                                  "-"
-                                )}
-                              </TableCell>
-                              <TableCell
-                                className={leg.type === "PUT" ? (roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
-                              >
-                                {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={isExpiredContract ? "secondary" : "outline"}>
-                                  {isExpiredContract ? "Expired" : leg.is_assigned ? "Assigned" : "Closed"}
-                                </Badge>
-                              </TableCell>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none md:hidden" />
+                      <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none md:hidden" />
+                      <div className="overflow-x-auto scrollbar-none">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-border/50">
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Symbol</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Type</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Strike</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Open Date</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Close/Expiry Date</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Days Open</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Net P/L</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">ROI/Day</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Monthly ROI</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">ROI</TableHead>
+                              <TableHead className="text-muted-foreground whitespace-nowrap">Status</TableHead>
                             </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {allClosedLegs.map((leg) => {
+                              const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
+                              const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+                              const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
+                              const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium
+                              const collateral =
+                                leg.type === "PUT"
+                                  ? calculateCapitalAtRisk(leg.strike, leg.contracts)
+                                  : leg.open_price * 100 * leg.contracts
+                              // TODO: Properly handle ROI calculations for covered calls
+                              // Currently hiding ROI for covered calls as it requires share cost basis
+                              // and proper handling of assignment scenarios
+                              const roi = leg.type === "PUT" ? calculateLegROI(netPL, collateral) : 0
+                              const closeOrExpiryDate = leg.closeDate || leg.expiry
+                              const daysOpen = Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
+                              const roiPerDay = leg.type === "PUT" && daysOpen > 0 ? roi / daysOpen : 0
+                              const monthlyROI = leg.type === "PUT" ? (daysOpen < 30 ? roiPerDay * 30 : roi) : 0
+
+                              return (
+                                <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
+                                  <TableCell className="font-medium text-foreground whitespace-nowrap">{leg.symbol}</TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
+                                      {leg.side} {leg.type}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">${leg.strike}</TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">{leg.openDate.toLocaleDateString()}</TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">{closeOrExpiryDate.toLocaleDateString()}</TableCell>
+                                  <TableCell className="text-foreground whitespace-nowrap">{daysOpen}</TableCell>
+                                  <TableCell className={`whitespace-nowrap ${netPL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                    ${netPL.toFixed(2)}
+                                  </TableCell>
+                                  <TableCell className={`whitespace-nowrap ${roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                    {leg.type === "PUT" ? `${roiPerDay.toFixed(2)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className={`whitespace-nowrap ${monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                    {leg.type === "PUT" ? (
+                                      <>
+                                        {monthlyROI.toFixed(2)}%
+                                        {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
+                                      </>
+                                    ) : (
+                                      "-"
+                                    )}
+                                  </TableCell>
+                                  <TableCell className={`whitespace-nowrap ${roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                    {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
+                                  </TableCell>
+                                  <TableCell className="whitespace-nowrap">
+                                    <Badge variant={isExpiredContract ? "secondary" : "outline"}>
+                                      {isExpiredContract ? "Expired" : leg.is_assigned ? "Assigned" : "Closed"}
+                                    </Badge>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -656,12 +668,6 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                     No positions to analyze. Add some contracts to see market analysis.
                   </div>
                 )}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="add" className="space-y-4">
-              <div className="flex justify-center">
-                <ContractEntryForm onSubmit={handleContractAdded} />
               </div>
             </TabsContent>
           </Tabs>

@@ -94,9 +94,16 @@ export function calculateSharesAtRisk(
 ): SharesAtRiskSummary {
   const positions: SharesAtRiskPosition[] = []
 
+  // Helper function to check if a position is expired
+  const isExpired = (expiry: Date): boolean => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return expiry < today
+  }
+
   // Find all open PUT positions that could be assigned (new shares)
   const openPuts = legs.filter(
-    (leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned,
+    (leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned && !isExpired(leg.expiry),
   )
 
   for (const leg of openPuts) {
@@ -138,7 +145,7 @@ export function calculateSharesAtRisk(
 
   // Find all open CALL positions that could result in shares being called away
   const openCalls = legs.filter(
-    (leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned,
+    (leg) => leg.type === "CALL" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned && !isExpired(leg.expiry),
   )
 
   for (const leg of openCalls) {
@@ -382,7 +389,15 @@ export function calculatePortfolioValue(
 
   // Calculate CSP collateral value first
   const collateralValue = legs
-    .filter((leg) => leg.type === "PUT" && leg.side === "SELL" && !leg.closeDate && !leg.is_assigned)
+    .filter((leg) => {
+      const now = new Date()
+      const isExpired = leg.expiry < now
+      return leg.type === "PUT" && 
+             leg.side === "SELL" && 
+             !leg.closeDate && 
+             !leg.is_assigned && 
+             !isExpired
+    })
     .reduce((sum, leg) => sum + leg.strike * 100 * leg.contracts, 0)
 
   // Adjust cash balance to account for CSP collateral

@@ -67,15 +67,15 @@ export function Navbar({ onNewEntry }: NavbarProps) {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-4">
             <div className="flex items-center space-x-6 text-sm">
-              <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
+              {/* <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
                 Dashboard
-              </Link>
-              <a href="#positions" className="text-muted-foreground hover:text-foreground transition-colors">
+              </Link> */}
+              {/* <a href="#positions" className="text-muted-foreground hover:text-foreground transition-colors">
                 Positions
               </a>
               <a href="#analytics" className="text-muted-foreground hover:text-foreground transition-colors">
                 Analytics
-              </a>
+              </a> */}
             </div>
 
             {/* Quick Actions */}

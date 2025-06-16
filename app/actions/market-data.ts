@@ -1,15 +1,16 @@
 "use server"
 
 import { createServerClient } from "@/lib/supabase/server"
-import { getAlphaVantageClient } from "@/lib/alpha-vantage"
+import { getMarketDataService } from "@/lib/services"
 import { analyzePosition, shouldAutoExercise, calculateAssignmentDetails } from "@/utils/option-calculations"
 import { getLegsServer } from "@/lib/supabase/queries"
 import { revalidatePath } from "next/cache"
+import { MarketDataError } from "@/lib/services/market-data-service"
 
 export async function updateMarketData() {
   try {
     const supabase = await createServerClient()
-    const alphaVantage = getAlphaVantageClient()
+    const marketData = getMarketDataService()
 
     // Get all open positions
     const legs = await getLegsServer()
@@ -28,7 +29,7 @@ export async function updateMarketData() {
     const allSymbols = [...new Set([...optionSymbols, ...stockSymbols])]
 
     // Fetch current market data
-    const quotes = await alphaVantage.getMultipleQuotes(allSymbols)
+    const quotes = await marketData.getMultipleQuotes(allSymbols)
 
     let updatedPositions = 0
     let exercisedLegs = 0
@@ -141,7 +142,11 @@ export async function updateMarketData() {
 
         updatedPositions++
       } catch (error) {
-        errors.push(`Error processing ${symbol}: ${error instanceof Error ? error.message : "Unknown error"}`)
+        if (error instanceof MarketDataError) {
+          errors.push(`Market data error for ${symbol}: ${error.message} (Source: ${error.source})`)
+        } else {
+          errors.push(`Error processing ${symbol}: ${error instanceof Error ? error.message : "Unknown error"}`)
+        }
       }
     }
 
@@ -164,7 +169,7 @@ export async function updateMarketData() {
 export async function getPositionAnalysis(positionId: string) {
   try {
     const supabase = await createServerClient()
-    const alphaVantage = getAlphaVantageClient()
+    const marketData = getMarketDataService()
 
     // Get position legs
     const { data: legs, error } = await supabase
@@ -180,7 +185,7 @@ export async function getPositionAnalysis(positionId: string) {
     }
 
     const symbol = legs[0].positions.symbol
-    const quote = await alphaVantage.getQuote(symbol)
+    const quote = await marketData.getQuote(symbol)
 
     if (!quote) {
       throw new Error(`No market data available for ${symbol}`)
@@ -200,6 +205,39 @@ export async function getPositionAnalysis(positionId: string) {
     return { success: true, analysis, quote }
   } catch (error) {
     console.error("Error getting position analysis:", error)
+    if (error instanceof MarketDataError) {
+      return {
+        success: false,
+        error: `Market data error: ${error.message} (Source: ${error.source})`,
+      }
+    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function getStockQuotes(symbols: string[]) {
+  try {
+    const marketData = getMarketDataService()
+    const quotes = await marketData.getMultipleQuotes(symbols)
+    
+    // Convert Map to object for serialization
+    const quotesObject: Record<string, StockQuote> = {}
+    quotes.forEach((quote, symbol) => {
+      quotesObject[symbol] = quote
+    })
+    
+    return { success: true, quotes: quotesObject }
+  } catch (error) {
+    console.error("Error fetching stock quotes:", error)
+    if (error instanceof MarketDataError) {
+      return {
+        success: false,
+        error: `Market data error: ${error.message} (Source: ${error.source})`,
+      }
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error occurred",

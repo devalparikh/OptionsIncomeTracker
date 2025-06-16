@@ -1,7 +1,7 @@
 "use server"
 
 import { createServerClient } from "@/lib/supabase/server"
-import { getMarketDataService } from "@/lib/alpha-vantage"
+import { getMarketDataService } from "@/lib/services"
 import { analyzePosition, shouldAutoExercise, calculateAssignmentDetails } from "@/utils/option-calculations"
 import { getLegsServer } from "@/lib/supabase/queries"
 import { revalidatePath } from "next/cache"
@@ -205,6 +205,33 @@ export async function getPositionAnalysis(positionId: string) {
     return { success: true, analysis, quote }
   } catch (error) {
     console.error("Error getting position analysis:", error)
+    if (error instanceof MarketDataError) {
+      return {
+        success: false,
+        error: `Market data error: ${error.message} (Source: ${error.source})`,
+      }
+    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    }
+  }
+}
+
+export async function getStockQuotes(symbols: string[]) {
+  try {
+    const marketData = getMarketDataService()
+    const quotes = await marketData.getMultipleQuotes(symbols)
+    
+    // Convert Map to object for serialization
+    const quotesObject: Record<string, StockQuote> = {}
+    quotes.forEach((quote, symbol) => {
+      quotesObject[symbol] = quote
+    })
+    
+    return { success: true, quotes: quotesObject }
+  } catch (error) {
+    console.error("Error fetching stock quotes:", error)
     if (error instanceof MarketDataError) {
       return {
         success: false,

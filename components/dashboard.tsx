@@ -22,6 +22,7 @@ import { calculatePortfolioValue, generatePortfolioPerformance, analyzeCoveredCa
 import { CoveredCallSharesTable } from "./covered-call-shares-table"
 import { createClient } from "@/lib/supabase/client"
 import { getAlphaVantageClient } from "@/lib/alpha-vantage"
+import { getStockQuotes } from "@/app/actions/market-data"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -90,10 +91,13 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
   // Add function to fetch stock quotes
   const fetchStockQuotes = async () => {
-    const alphaVantage = getAlphaVantageClient()
     const symbols = [...new Set([...stockPositions.map(pos => pos.symbol), ...legs.map(leg => leg.symbol)])]
-    const quotes = await alphaVantage.getMultipleQuotes(symbols)
-    setStockQuotes(quotes)
+    const result = await getStockQuotes(symbols)
+    if (result.success && result.quotes) {
+      setStockQuotes(new Map(Object.entries(result.quotes)))
+    } else {
+      console.error("Error fetching stock quotes:", result.error)
+    }
   }
 
   // Create a combined refetch function that updates everything

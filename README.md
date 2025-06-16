@@ -63,7 +63,9 @@ The application will be available at `http://localhost:3000`
 
 - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase project's anon/public key
-- `NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY`: Your Alpha Vantage API key for fetching stock quotes
+- `ALPHA_VANTAGE_API_KEY`: Your Alpha Vantage API key for fetching stock quotes
+- `ALPACA_API_KEY`: Your Alpaca API key for backup market data
+- `ALPACA_SECRET_KEY`: Your Alpaca secret key for backup market data
 
 ## Deployment
 
@@ -89,17 +91,17 @@ Continue building your app on:
 Create a `.env.local` file in the root directory with the following variables:
 
 ```bash
-# Supabase
+# Supabase (Public keys - safe to expose)
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# Alpha Vantage (Primary Market Data API)
-NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
+# Alpha Vantage (Private API Key - server-side only)
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
 # Note: Free tier has a limit of 25 requests per day. When rate limit is hit, the app will fall back to Alpaca.
 
-# Alpaca (Backup Market Data API)
-NEXT_PUBLIC_ALPACA_API_KEY=your_alpaca_api_key
-NEXT_PUBLIC_ALPACA_SECRET_KEY=your_alpaca_secret_key
+# Alpaca (Private API Keys - server-side only)
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 # Note: Using paper trading mode for market data access.
 ```
 

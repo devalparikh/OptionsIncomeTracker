@@ -7,6 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { LogOut, Settings } from "lucide-react"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
+import { useRouter } from "next/navigation"
 
 interface UserProfileProps {
   user: SupabaseUser
@@ -14,6 +15,7 @@ interface UserProfileProps {
 
 export function UserProfile({ user }: UserProfileProps) {
   const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
   const supabase = createClient()
 
   const handleSignOut = async () => {
@@ -48,7 +50,7 @@ export function UserProfile({ user }: UserProfileProps) {
             <p className="w-[200px] truncate text-sm text-muted-foreground">{user.email}</p>
           </div>
         </div>
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={() => router.push("/settings")}>
           <Settings className="mr-2 h-4 w-4" />
           <span>Settings</span>
         </DropdownMenuItem>

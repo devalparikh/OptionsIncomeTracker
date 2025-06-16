@@ -9,6 +9,7 @@ import { KeyboardShortcutsHelp } from "./keyboard-shortcuts-help"
 import { UserProfile } from "./auth/user-profile"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
+import Link from "next/link"
 
 interface NavbarProps {
   onNewEntry?: () => void
@@ -47,24 +48,25 @@ export function Navbar({ onNewEntry }: NavbarProps) {
       <div className="container mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           {/* Logo and Title */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20">
-              <TrendingUp className="h-4 w-4 text-primary" />
+          <Link href="/" className="text-muted-foreground hover:text-foreground transition-colors">
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20">
+                <TrendingUp className="h-4 w-4 text-primary" />
+              </div>
+              <div className="flex items-center space-x-2">
+                <h1 className="text-xl font-bold text-foreground">Options Wheel Tracker</h1>
+                <Badge variant="outline" className="text-xs">
+                  MVP
+                </Badge>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-xl font-bold text-foreground">Options Wheel Tracker</h1>
-              <Badge variant="outline" className="text-xs">
-                MVP
-              </Badge>
-            </div>
-          </div>
-
+          </Link>
           {/* Navigation Items */}
           <div className="flex items-center space-x-4">
             <div className="hidden md:flex items-center space-x-6 text-sm">
-              <a href="#dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
+              <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
                 Dashboard
-              </a>
+              </Link>
               <a href="#positions" className="text-muted-foreground hover:text-foreground transition-colors">
                 Positions
               </a>

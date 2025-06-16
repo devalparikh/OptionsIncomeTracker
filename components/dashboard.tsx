@@ -557,7 +557,10 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                           <TableHead className="text-muted-foreground">Strike</TableHead>
                           <TableHead className="text-muted-foreground">Open Date</TableHead>
                           <TableHead className="text-muted-foreground">Close/Expiry Date</TableHead>
+                          <TableHead className="text-muted-foreground">Days Open</TableHead>
                           <TableHead className="text-muted-foreground">Net P/L</TableHead>
+                          <TableHead className="text-muted-foreground">ROI/Day</TableHead>
+                          <TableHead className="text-muted-foreground">Monthly ROI</TableHead>
                           <TableHead className="text-muted-foreground">ROI</TableHead>
                           <TableHead className="text-muted-foreground">Status</TableHead>
                         </TableRow>
@@ -572,7 +575,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                             leg.type === "PUT"
                               ? calculateCapitalAtRisk(leg.strike, leg.contracts)
                               : leg.open_price * 100 * leg.contracts
-                          const roi = calculateLegROI(netPL, collateral)
+                          // TODO: Properly handle ROI calculations for covered calls
+                          // Currently hiding ROI for covered calls as it requires share cost basis
+                          // and proper handling of assignment scenarios
+                          const roi = leg.type === "PUT" ? calculateLegROI(netPL, collateral) : 0
+                          const closeOrExpiryDate = leg.closeDate || leg.expiry
+                          const daysOpen = Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
+                          const roiPerDay = leg.type === "PUT" && daysOpen > 0 ? roi / daysOpen : 0
+                          const monthlyROI = leg.type === "PUT" ? (daysOpen < 30 ? roiPerDay * 30 : roi) : 0
 
                           return (
                             <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
@@ -587,15 +597,35 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                               <TableCell className="text-foreground">
                                 {leg.closeDate?.toLocaleDateString() || leg.expiry.toLocaleDateString()}
                               </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{daysOpen}d</Badge>
+                              </TableCell>
                               <TableCell
                                 className={netPL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}
                               >
                                 ${netPL.toFixed(2)}
                               </TableCell>
                               <TableCell
-                                className={roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}
+                                className={leg.type === "PUT" ? (roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
                               >
-                                {roi.toFixed(2)}%
+                                {leg.type === "PUT" ? `${roiPerDay.toFixed(2)}%/d` : "-"}
+                              </TableCell>
+                              <TableCell
+                                className={leg.type === "PUT" ? (monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
+                              >
+                                {leg.type === "PUT" ? (
+                                  <>
+                                    {monthlyROI.toFixed(2)}%
+                                    {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
+                                  </>
+                                ) : (
+                                  "-"
+                                )}
+                              </TableCell>
+                              <TableCell
+                                className={leg.type === "PUT" ? (roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium") : "text-muted-foreground"}
+                              >
+                                {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
                               </TableCell>
                               <TableCell>
                                 <Badge variant={isExpiredContract ? "secondary" : "outline"}>

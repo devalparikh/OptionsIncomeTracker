@@ -3,6 +3,7 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { ProfileSettings } from "@/components/settings/profile-settings"
 import { PurgeDataButton } from "@/components/purge-data-button"
+import { RobinhoodUpload } from "@/components/RobinhoodUpload"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 
@@ -41,6 +42,18 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <ProfileSettings profile={profile} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Data Import</CardTitle>
+            <CardDescription>
+              Import your option positions from Robinhood.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RobinhoodUpload />
           </CardContent>
         </Card>
 

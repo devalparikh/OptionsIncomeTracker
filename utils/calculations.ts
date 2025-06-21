@@ -12,8 +12,28 @@ export function calculateCapitalAtRisk(strike: number, contracts: number): numbe
   return strike * 100 * contracts
 }
 
-export function calculateLegROI(premium: number, collateral: number): number {
-  return collateral > 0 ? (premium / collateral) * 100 : 0
+export function calculateLegROI(netPL: number, collateral: number): number {
+  return collateral > 0 ? (netPL / collateral) * 100 : 0
+}
+
+export function calculateROIPerDay(netPL: number, collateral: number, daysInTrade: number): number {
+  if (collateral <= 0 || daysInTrade <= 0) return 0
+  const totalROI = (netPL / collateral) * 100
+  return totalROI / daysInTrade
+}
+
+export function calculateMonthlyROI(netPL: number, collateral: number, daysInTrade: number): number {
+  if (collateral <= 0 || daysInTrade <= 0) return 0
+  const totalROI = (netPL / collateral) * 100
+  
+  // If trade was less than 30 days, extrapolate to monthly
+  if (daysInTrade < 30) {
+    return totalROI * (30 / daysInTrade)
+  }
+  
+  // If trade was more than 30 days, annualize and then convert to monthly
+  const annualizedROI = totalROI * (365 / daysInTrade)
+  return annualizedROI / 12
 }
 
 export function calculateAnnualizedROI(roi: number, daysInTrade: number): number {
@@ -22,7 +42,7 @@ export function calculateAnnualizedROI(roi: number, daysInTrade: number): number
 
 export function calculateDaysInTrade(openDate: Date, closeDate?: Date): number {
   const endDate = closeDate || new Date()
-  return Math.ceil((endDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.max(1, Math.ceil((endDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24)))
 }
 
 export function calculateBreakEvenPrice(costBasis: number, totalPremiums: number, shares: number): number {

@@ -11,7 +11,7 @@ import { MarketDataUpdater } from "./market-data-updater"
 import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
-import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI } from "@/utils/calculations"
+import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
 import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
@@ -133,6 +133,13 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   const openLegs = legs.filter((leg) => !leg.closeDate && !isExpired(leg.expiry))
   const expiredLegs = legs.filter((leg) => !leg.closeDate && isExpired(leg.expiry))
   const closedLegs = legs.filter((leg) => leg.closeDate)
+
+  console.log("openLegs:");
+  console.log(openLegs);
+  console.log("closedLegs:");
+  console.log(closedLegs);
+  console.log("expiredLegs:");
+  console.log(expiredLegs);
 
   // Combine expired and closed legs for the closed tab
   const allClosedLegs = [...closedLegs, ...expiredLegs]
@@ -589,6 +596,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                           </TableHeader>
                           <TableBody>
                             {allClosedLegs.map((leg) => {
+                              // console.log("legggg:");
+                              // console.log(leg);
                               const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
                               const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
                               const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
@@ -600,11 +609,11 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                               // TODO: Properly handle ROI calculations for covered calls
                               // Currently hiding ROI for covered calls as it requires share cost basis
                               // and proper handling of assignment scenarios
-                              const roi = leg.type === "PUT" ? calculateLegROI(netPL, collateral) : 0
+                              const roi = calculateLegROI(netPL, collateral)
                               const closeOrExpiryDate = leg.closeDate || leg.expiry
-                              const daysOpen = Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
-                              const roiPerDay = leg.type === "PUT" && daysOpen > 0 ? roi / daysOpen : 0
-                              const monthlyROI = leg.type === "PUT" ? (daysOpen < 30 ? roiPerDay * 30 : roi) : 0
+                              const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+                              const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
+                              const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
 
                               return (
                                 <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
@@ -638,8 +647,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                     {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
                                   </TableCell>
                                   <TableCell className="whitespace-nowrap">
-                                    <Badge variant={isExpiredContract ? "secondary" : "outline"}>
-                                      {isExpiredContract ? "Expired" : leg.is_assigned ? "Assigned" : "Closed"}
+                                    <Badge variant={
+                                      leg.is_assigned ? "destructive" : 
+                                      leg.is_exercised ? "secondary" : 
+                                      "outline"
+                                    }>
+                                      {leg.is_assigned ? "Assigned" : 
+                                       leg.is_exercised ? "Expired" : 
+                                       "Closed"}
                                     </Badge>
                                   </TableCell>
                                 </TableRow>

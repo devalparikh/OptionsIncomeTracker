@@ -1,390 +1,417 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
-import { RobinhoodCsvParser } from '@/lib/parsers/robinhood-csv';
-import { Portfolio as PortfolioModel } from '@/lib/types/portfolio';
+import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@/lib/supabase/server'
+import { RobinhoodCsvParser } from '@/lib/parsers/robinhood-csv'
+import { ActivityType } from '@/lib/types/trade'
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = await createServerClient();
+    const supabase = await createServerClient()
 
-    // Get user's session
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's default portfolio
-    const { data: accounts, error: accountsError } = await supabase
-      .from('accounts')
-      .select('id')
-      .eq('user_id', session.user.id as any)
-      .limit(1);
-
-    if (accountsError) {
-      throw accountsError;
-    }
-
-    if (!accounts?.length) {
-      return NextResponse.json(
-        { error: 'No account found' },
-        { status: 400 }
-      );
-    }
-
-    const account = accounts[0] as any;
-
-    const { data: portfolios, error: portfoliosError } = await supabase
-      .from('portfolios')
-      .select('id')
-      .eq('account_id', account.id)
-      .limit(1);
-
-    if (portfoliosError) {
-      throw portfoliosError;
-    }
-
-    if (!portfolios?.length) {
-      return NextResponse.json(
-        { error: 'No portfolio found' },
-        { status: 400 }
-      );
-    }
-
-    const portfolio = portfolios[0] as any;
-
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
+    // Parse form data
+    const formData = await request.formData()
+    const file = formData.get('file') as File
 
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
     // Validate file type and size
     if (file.type !== 'text/csv' && !file.name.endsWith('.csv')) {
-      return NextResponse.json(
-        { error: 'File must be a CSV' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid file type. Please upload a CSV file.' }, { status: 400 })
     }
 
     if (file.size > 2 * 1024 * 1024) { // 2MB limit
-      return NextResponse.json(
-        { error: 'File size must be less than 2MB' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'File too large. Maximum size is 2MB.' }, { status: 400 })
     }
 
-    const csvText = await file.text();
-    
-    // Parse CSV using the new parser
-    const trades = RobinhoodCsvParser.loadCsv(csvText);
+    // Read file content
+    const csvText = await file.text()
+
+    // Parse CSV using existing parser
+    const trades = RobinhoodCsvParser.loadCsv(csvText)
     
     if (trades.length === 0) {
-      return NextResponse.json(
-        { error: 'CSV file is empty or contains no valid trades' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'No valid trades found in CSV' }, { status: 400 })
     }
 
-    // Reverse trades to process in chronological order (oldest first)
-    trades.reverse();
+    // Get user's default portfolio
+    const { data: accounts, error: accountError } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('user_id', user.id)
+      .limit(1)
 
-    // Create portfolio and load trades
-    const portfolioModel = new PortfolioModel();
-    portfolioModel.loadShares(trades);
-    portfolioModel.loadOptions(trades);
-
-    const results = {
-      acceptedRows: trades.length,
-      ignoredRows: 0,
-      newPositions: 0,
-      newLegs: 0,
-      warnings: [] as string[],
-      realizedPnL: portfolioModel.realizedPnL,
-    };
-
-    // Save share positions to database
-    for (const [symbol, sharePosition] of portfolioModel.sharePositions) {
-      try {
-        if (sharePosition.quantity > 0) {
-          // Check for existing position
-          const { data: existingPositions, error: positionsError } = await supabase
-            .from('positions')
-            .select('id, quantity, cost_basis')
-            .eq('portfolio_id', portfolio.id)
-            .eq('symbol', symbol as any)
-            .eq('status', 'STOCK' as any);
-
-          if (positionsError) {
-            throw positionsError;
-          }
-
-          if (existingPositions?.length) {
-            // Update existing position
-            const existingPosition = existingPositions[0] as any;
-            const newQuantity = existingPosition.quantity + sharePosition.quantity;
-            const newCostBasis = sharePosition.quantity > 0 
-              ? ((existingPosition.cost_basis || 0) * existingPosition.quantity + sharePosition.costBasis * sharePosition.quantity) / newQuantity
-              : existingPosition.cost_basis;
-
-            const { error: updateError } = await supabase
-              .from('positions')
-              .update({
-                quantity: newQuantity,
-                cost_basis: newCostBasis,
-              } as any)
-              .eq('id', existingPosition.id);
-
-            if (updateError) {
-              throw updateError;
-            }
-          } else {
-            // Create new position
-            const { error: insertError } = await supabase
-              .from('positions')
-              .insert({
-                portfolio_id: portfolio.id,
-                symbol,
-                status: 'STOCK',
-                quantity: sharePosition.quantity,
-                cost_basis: sharePosition.costBasis,
-                current_price: null,
-              } as any);
-
-            if (insertError) {
-              throw insertError;
-            }
-
-            results.newPositions++;
-          }
-        }
-      } catch (error) {
-        results.warnings.push(`Error processing share position for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        results.ignoredRows++;
-      }
+    if (accountError || !accounts || accounts.length === 0) {
+      return NextResponse.json({ error: 'No account found. Please create an account first.' }, { status: 400 })
     }
 
-    // Save options positions to database
-    for (const [symbol, optionPosition] of portfolioModel.optionsPositions) {
-      try {
-        // Create position for options
-        const { data: existingPositions, error: positionsError } = await supabase
-          .from('positions')
-          .select('id')
-          .eq('portfolio_id', portfolio.id)
-          .eq('symbol', symbol as any)
-          .eq('status', 'PUT' as any)
-          .limit(1);
+    const accountId = accounts[0].id
 
-        if (positionsError) {
-          throw positionsError;
-        }
+    const { data: portfolios, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id')
+      .eq('account_id', accountId)
+      .limit(1)
 
-        let positionId: string;
-
-        if (existingPositions?.length) {
-          positionId = (existingPositions[0] as any).id;
-          
-          // Update existing position
-          const { error: updateError } = await supabase
-            .from('positions')
-            .update({
-              quantity: optionPosition.quantity,
-            } as any)
-            .eq('id', positionId as any);
-
-          if (updateError) {
-            throw updateError;
-          }
-        } else {
-          // Create new position
-          const { data: position, error: positionError } = await supabase
-            .from('positions')
-            .insert({
-              portfolio_id: portfolio.id,
-              symbol,
-              status: 'PUT',
-              quantity: optionPosition.quantity,
-              cost_basis: null,
-              current_price: null,
-            } as any)
-            .select('id')
-            .single();
-
-          if (positionError) {
-            throw positionError;
-          }
-
-          if (!position) {
-            throw new Error('Failed to create position');
-          }
-
-          positionId = (position as any).id;
-          results.newPositions++;
-        }
-
-        // Create legs for each closed lot
-        for (const closedLot of optionPosition.closedLotsData) {
-          // Determine the status based on how the leg was closed
-          let status = 'CLOSED'; // default status
-          let isAssigned = false;
-          let isExercised = false;
-          
-          console.log(`Processing closed lot for ${symbol}:`);
-          console.log(`  Original trade type: ${closedLot.originalTrade.type}`);
-          console.log(`  Close trade type: ${closedLot.closeTrade.type}`);
-          console.log(`  Close trade description: ${closedLot.closeTrade.notes}`);
-          
-          if (closedLot.closeTrade.type === 'Assignment') {
-            status = 'ASSIGNED';
-            isAssigned = true;
-            console.log(`  Setting status to ASSIGNED`);
-          } else if (closedLot.closeTrade.type === 'Expired') {
-            status = 'EXPIRED';
-            isExercised = true;
-            console.log(`  Setting status to EXPIRED`);
-          } else if (closedLot.closeTrade.type === 'BTC') {
-            status = 'CLOSED';
-            console.log(`  Setting status to CLOSED`);
-          }
-          
-          const { error: legError } = await supabase
-            .from('legs')
-            .insert({
-              position_id: positionId,
-              side: 'SELL',
-              type: closedLot.originalTrade.optionType === 'Call' ? 'CALL' : 'PUT',
-              strike: closedLot.originalTrade.strikePrice!,
-              expiry: closedLot.originalTrade.expiration!.toISOString().split('T')[0],
-              open_date: closedLot.openDate.toISOString().split('T')[0],
-              open_price: closedLot.originalTrade.price!,
-              close_date: closedLot.closeDate.toISOString().split('T')[0],
-              close_price: closedLot.closeTrade.type === 'BTC' ? closedLot.closeTrade.price! : 0,
-              contracts: closedLot.originalTrade.quantity!,
-              commissions: 0,
-              is_assigned: isAssigned,
-              is_exercised: isExercised,
-              share_cost_basis: null,
-            } as any);
-
-          if (legError) {
-            results.warnings.push(`Error creating leg for ${symbol}: ${legError.message}`);
-          } else {
-            results.newLegs++;
-          }
-        }
-
-        // Create legs for remaining open lots (if any)
-        if (optionPosition.quantity > 0) {
-          // For open positions, we need to create legs for the remaining contracts
-          // This is a simplified approach - in a full implementation, you'd track each contract separately
-          results.warnings.push(`Open option position for ${symbol} created but individual open legs not yet implemented`);
-        }
-
-      } catch (error) {
-        results.warnings.push(`Error processing option position for ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        results.ignoredRows++;
-      }
+    if (portfolioError || !portfolios || portfolios.length === 0) {
+      return NextResponse.json({ error: 'No portfolio found. Please create a portfolio first.' }, { status: 400 })
     }
 
-    // Convert Maps to plain objects for JSON serialization
-    const sharePositions = Object.fromEntries(
-      Array.from(portfolioModel.sharePositions.entries()).map(([symbol, position]) => [
-        symbol,
-        {
-          symbol: position.symbol,
-          quantity: position.quantity,
-          costBasis: position.costBasis,
-          realizedPnL: position.realizedPnL,
-        }
-      ])
-    );
+    const portfolioId = portfolios[0].id
 
-    const openOptionsPositions = Object.fromEntries(
-      Array.from(portfolioModel.openOptionsPositions.entries()).map(([symbol, position]) => [
-        symbol,
-        {
-          symbol: position.symbol,
-          quantity: position.quantity,
-          totalCredit: position.totalCredit,
-          realizedPnL: position.realizedPnL,
-          isClosed: position.isClosed,
-          closedLotsCount: position.closedLotsCount,
-          totalContractsClosed: position.totalContractsClosed,
-          closedLots: position.closedLotsData.map(lot => ({
-            date: lot.closeDate,
-            symbol: lot.originalTrade.symbol,
-            type: lot.closeTrade.type,
-            quantity: lot.originalTrade.quantity,
-            price: lot.closeTrade.price,
-            underlying: lot.originalTrade.underlying,
-            expiration: lot.originalTrade.expiration,
-            strikePrice: lot.originalTrade.strikePrice,
-            optionType: lot.originalTrade.optionType,
-            notes: lot.closeTrade.notes,
-          })),
-        }
-      ])
-    );
+    // Process trades and store in database
+    const result = await processTrades(trades, portfolioId, supabase)
 
-    const closedOptionsPositions = Object.fromEntries(
-      Array.from(portfolioModel.closedOptionsPositions.entries()).map(([symbol, position]) => [
-        symbol,
-        {
-          symbol: position.symbol,
-          quantity: position.quantity,
-          totalCredit: position.totalCredit,
-          realizedPnL: position.realizedPnL,
-          isClosed: position.isClosed,
-          closedLotsCount: position.closedLotsCount,
-          totalContractsClosed: position.totalContractsClosed,
-          closedLots: position.closedLotsData.map(lot => ({
-            date: lot.closeDate,
-            symbol: lot.originalTrade.symbol,
-            type: lot.closeTrade.type,
-            quantity: lot.originalTrade.quantity,
-            price: lot.closeTrade.price,
-            underlying: lot.originalTrade.underlying,
-            expiration: lot.originalTrade.expiration,
-            strikePrice: lot.originalTrade.strikePrice,
-            optionType: lot.originalTrade.optionType,
-            notes: lot.closeTrade.notes,
-          })),
-        }
-      ])
-    );
+    return NextResponse.json(result)
 
-    const finalResults = {
-      ...results,
-      sharePositions,
-      openOptionsPositions,
-      closedOptionsPositions,
-      trades: trades.map(trade => ({
-        date: trade.date,
-        symbol: trade.symbol,
-        type: trade.type,
-        quantity: trade.quantity,
-        price: trade.price,
-        isOption: trade.isOption,
-        underlying: trade.underlying,
-        expiration: trade.expiration,
-        strikePrice: trade.strikePrice,
-        optionType: trade.optionType,
-      })),
-    };
-
-    return NextResponse.json(finalResults);
   } catch (error) {
-    console.error('Error processing CSV upload:', error);
+    console.error('Error processing Robinhood CSV upload:', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
-    );
+    )
+  }
+}
+
+async function processTrades(
+  trades: any[],
+  portfolioId: string,
+  supabase: any
+): Promise<{
+  acceptedRows: number
+  ignoredRows: number
+  newPositions: number
+  warnings: string[]
+}> {
+  const warnings: string[] = []
+  let acceptedRows = 0
+  let ignoredRows = 0
+  let newPositions = 0
+
+  // Sort trades by date (oldest first)
+  trades.sort((a, b) => a.date.getTime() - b.date.getTime())
+
+  // Track open positions for matching closes
+  const openPositions = new Map<string, any>()
+
+  for (const trade of trades) {
+    try {
+      if (!trade.symbol || !trade.date) {
+        ignoredRows++
+        continue
+      }
+
+      acceptedRows++
+
+      if (trade.isOption) {
+        // Handle option trades
+        const positionKey = `${trade.symbol}_${trade.expiration?.toISOString().split('T')[0]}_${trade.strikePrice}_${trade.optionType}`
+        
+        switch (trade.type) {
+          case ActivityType.STO: // Sell to Open
+            await createOptionPosition(trade, portfolioId, supabase)
+            openPositions.set(positionKey, trade)
+            newPositions++
+            break
+
+          case ActivityType.BTC: // Buy to Close
+            await closeOptionPosition(trade, portfolioId, supabase, openPositions)
+            break
+
+          case ActivityType.Expired: // Expired worthless
+            await closeOptionPosition(trade, portfolioId, supabase, openPositions, true)
+            break
+
+          case ActivityType.Assignment: // Assignment
+            await handleAssignment(trade, portfolioId, supabase, openPositions)
+            break
+
+          default:
+            ignoredRows++
+            warnings.push(`Unhandled option activity type: ${trade.type} for ${trade.symbol}`)
+        }
+      } else {
+        // Handle stock trades
+        switch (trade.type) {
+          case ActivityType.Buy:
+            await createOrUpdateStockPosition(trade, portfolioId, supabase, true)
+            break
+
+          case ActivityType.Sell:
+            await createOrUpdateStockPosition(trade, portfolioId, supabase, false)
+            break
+
+          default:
+            ignoredRows++
+            warnings.push(`Unhandled stock activity type: ${trade.type} for ${trade.symbol}`)
+        }
+      }
+    } catch (error) {
+      console.error('Error processing trade:', trade, error)
+      warnings.push(`Error processing trade: ${trade.symbol} ${trade.type} - ${error instanceof Error ? error.message : 'Unknown error'}`)
+      ignoredRows++
+    }
+  }
+
+  return {
+    acceptedRows,
+    ignoredRows,
+    newPositions,
+    warnings
+  }
+}
+
+async function createOptionPosition(trade: any, portfolioId: string, supabase: any) {
+  // Use exact quantity (supports fractional contracts)
+  const quantity = trade.quantity || 0
+  
+  // Create position first
+  const { data: position, error: positionError } = await supabase
+    .from('positions')
+    .insert({
+      portfolio_id: portfolioId,
+      symbol: trade.symbol,
+      status: trade.optionType?.toUpperCase(),
+      quantity: quantity,
+      cost_basis: null,
+      current_price: null,
+    })
+    .select('id')
+    .single()
+
+  if (positionError) {
+    throw new Error(`Failed to create position: ${positionError.message}`)
+  }
+
+  if (!position) {
+    throw new Error('Failed to create position: No data returned')
+  }
+
+  // Create leg
+  const { error: legError } = await supabase
+    .from('legs')
+    .insert({
+      position_id: position.id,
+      side: 'SELL', // STO is always sell
+      type: trade.optionType?.toUpperCase(),
+      strike: trade.strikePrice,
+      expiry: trade.expiration?.toISOString().split('T')[0],
+      open_date: trade.date.toISOString().split('T')[0],
+      open_price: trade.price || 0,
+      contracts: quantity,
+      commissions: 0, // Could be calculated from amount vs price*quantity
+      is_assigned: false,
+      is_exercised: false,
+    })
+
+  if (legError) {
+    throw new Error(`Failed to create leg: ${legError.message}`)
+  }
+}
+
+async function closeOptionPosition(
+  trade: any, 
+  portfolioId: string, 
+  supabase: any, 
+  openPositions: Map<string, any>,
+  isExpired = false
+) {
+  const positionKey = `${trade.symbol}_${trade.expiration?.toISOString().split('T')[0]}_${trade.strikePrice}_${trade.optionType}`
+  
+  // Find the open leg to close
+  const { data: legs, error: legError } = await supabase
+    .from('legs')
+    .select(`
+      id,
+      position_id,
+      open_price,
+      contracts,
+      side,
+      commissions,
+      positions!inner(portfolio_id, symbol, status)
+    `)
+    .eq('positions.portfolio_id', portfolioId)
+    .eq('positions.symbol', trade.symbol)
+    .eq('type', trade.optionType?.toUpperCase())
+    .eq('strike', trade.strikePrice)
+    .eq('expiry', trade.expiration?.toISOString().split('T')[0])
+    .eq('side', 'SELL')
+    .is('close_date', null)
+    .is('is_assigned', false)
+    .is('is_exercised', false)
+
+  if (legError) {
+    throw new Error(`Failed to find open leg: ${legError.message}`)
+  }
+
+  if (!legs || legs.length === 0) {
+    throw new Error(`No open position found to close for ${trade.symbol}`)
+  }
+
+  // Close the leg
+  const leg = legs[0]
+  
+  // Determine close type based on trade type
+  let closeType: 'BTC' | 'EXPIRED' | 'ASSIGNED' | 'EXERCISED' | null = null
+  if (trade.type === ActivityType.BTC) {
+    closeType = 'BTC'
+  } else if (trade.type === ActivityType.Expired) {
+    closeType = 'EXPIRED'
+  } else if (trade.type === ActivityType.Assignment) {
+    closeType = 'ASSIGNED'
+  }
+
+  // Calculate realized PnL
+  const openPremium = leg.open_price * 100 * leg.contracts
+  let closeCost = 0
+  let realizedPnL = 0
+
+  if (trade.type === ActivityType.Expired) {
+    // For expired contracts, close_price is typically 0 or null
+    // Realized PnL is the full premium received (since option expired worthless)
+    closeCost = 0
+    realizedPnL = leg.side === 'SELL' 
+      ? openPremium - (leg.commissions || 0)  // Keep full premium minus commissions
+      : -(leg.commissions || 0)  // Long options that expire worthless lose the premium paid
+  } else {
+    // For BTC or Assignment, use the actual close price
+    closeCost = (trade.price || 0) * 100 * leg.contracts
+    realizedPnL = leg.side === 'SELL' 
+      ? openPremium - closeCost - (leg.commissions || 0)
+      : closeCost - openPremium - (leg.commissions || 0)
+  }
+
+  const { error: updateError } = await supabase
+    .from('legs')
+    .update({
+      close_date: trade.date.toISOString().split('T')[0],
+      close_price: trade.price || 0,
+      close_type: closeType,
+      realized_pnl: realizedPnL,
+      is_assigned: trade.type === ActivityType.Assignment,
+      is_exercised: trade.type === ActivityType.Expired,
+    })
+    .eq('id', leg.id)
+
+  if (updateError) {
+    throw new Error(`Failed to close leg: ${updateError.message}`)
+  }
+
+  // Remove from open positions
+  openPositions.delete(positionKey)
+}
+
+async function handleAssignment(trade: any, portfolioId: string, supabase: any, openPositions: Map<string, any>) {
+  // For assignments, we need to handle both the option assignment and potential stock delivery
+  await closeOptionPosition(trade, portfolioId, supabase, openPositions, false)
+  
+  // If this is a call assignment, we might need to handle stock delivery
+  if (trade.optionType === 'Call') {
+    // The stock delivery would be handled in a separate trade entry
+    // This is just the option assignment marker
+  }
+}
+
+async function createOrUpdateStockPosition(trade: any, portfolioId: string, supabase: any, isBuy: boolean) {
+  // Use exact quantity (supports fractional shares)
+  const quantity = trade.quantity || 0
+  
+  // Check if position exists
+  const { data: existingPosition, error: selectError } = await supabase
+    .from('positions')
+    .select('id, quantity, cost_basis')
+    .eq('portfolio_id', portfolioId)
+    .eq('symbol', trade.symbol)
+    .eq('status', 'STOCK')
+    .maybeSingle()
+
+  if (selectError) {
+    throw new Error(`Failed to check existing position: ${selectError.message}`)
+  }
+
+  if (isBuy) {
+    // Buying stock
+    if (existingPosition) {
+      // Update existing position with weighted average cost basis
+      const existingQuantity = existingPosition.quantity || 0
+      const existingCostBasis = existingPosition.cost_basis || 0
+      const newQuantity = quantity
+      const newCostBasis = trade.price || 0
+      
+      const totalQuantity = existingQuantity + newQuantity
+      const weightedCostBasis = existingQuantity > 0
+        ? ((existingQuantity * existingCostBasis) + (newQuantity * newCostBasis)) / totalQuantity
+        : newCostBasis
+
+      const { error: updateError } = await supabase
+        .from('positions')
+        .update({
+          quantity: totalQuantity,
+          cost_basis: weightedCostBasis,
+        })
+        .eq('id', existingPosition.id)
+
+      if (updateError) {
+        throw new Error(`Failed to update position: ${updateError.message}`)
+      }
+    } else {
+      // Create new position
+      const { error: insertError } = await supabase
+        .from('positions')
+        .insert({
+          portfolio_id: portfolioId,
+          symbol: trade.symbol,
+          status: 'STOCK',
+          quantity: quantity,
+          cost_basis: trade.price || 0,
+          current_price: null,
+        })
+
+      if (insertError) {
+        throw new Error(`Failed to create position: ${insertError.message}`)
+      }
+    }
+  } else {
+    // Selling stock
+    if (existingPosition) {
+      const remainingQuantity = (existingPosition.quantity || 0) - quantity
+      
+      if (remainingQuantity < 0) {
+        throw new Error(`Insufficient shares to sell for ${trade.symbol}`)
+      }
+
+      // Calculate realized PnL for the sold shares
+      const soldQuantity = quantity
+      const costBasis = existingPosition.cost_basis || 0
+      const salePrice = trade.price || 0
+      const realizedPnL = (salePrice - costBasis) * soldQuantity
+
+      const { error: updateError } = await supabase
+        .from('positions')
+        .update({
+          quantity: remainingQuantity,
+          // Keep the same cost basis for remaining shares
+        })
+        .eq('id', existingPosition.id)
+
+      if (updateError) {
+        throw new Error(`Failed to update position: ${updateError.message}`)
+      }
+
+      // Note: In a more sophisticated implementation, you might want to track realized PnL
+      // at the portfolio level or in a separate trades table. For now, we're just
+      // calculating it but not storing it since the positions table doesn't have
+      // a realized_pnl field for stocks.
+      
+      console.log(`Realized PnL for ${trade.symbol} sale: $${realizedPnL.toFixed(2)}`)
+    } else {
+      throw new Error(`No position found to sell for ${trade.symbol}`)
+    }
   }
 } 

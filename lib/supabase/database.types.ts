@@ -134,6 +134,8 @@ export interface Database {
           open_price: number
           close_date: string | null
           close_price: number | null
+          close_type: "BTC" | "EXPIRED" | "ASSIGNED" | "EXERCISED" | null
+          realized_pnl: number
           contracts: number
           commissions: number
           is_assigned: boolean | null
@@ -153,6 +155,8 @@ export interface Database {
           open_price: number
           close_date?: string | null
           close_price?: number | null
+          close_type?: "BTC" | "EXPIRED" | "ASSIGNED" | "EXERCISED" | null
+          realized_pnl?: number
           contracts: number
           commissions?: number
           is_assigned?: boolean | null
@@ -172,6 +176,8 @@ export interface Database {
           open_price?: number
           close_date?: string | null
           close_price?: number | null
+          close_type?: "BTC" | "EXPIRED" | "ASSIGNED" | "EXERCISED" | null
+          realized_pnl?: number
           contracts?: number
           commissions?: number
           is_assigned?: boolean | null

@@ -365,15 +365,15 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           {/* Replace the existing Portfolio Performance Chart section with: */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
-              <RobinhoodStyleChart data={portfolioCalculations.performanceData} className="h-full" />
+              {/* <RobinhoodStyleChart data={portfolioCalculations.performanceData} className="h-full" /> */}
             </div>
             <div className="space-y-4">
-              <PortfolioValueWidget
+              {/* <PortfolioValueWidget
                 portfolioValue={portfolioCalculations.portfolioVal}
                 loading={loading}
                 onRefresh={refetch}
               />
-              <SharesAtRiskWidget sharesAtRisk={portfolioCalculations.portfolioVal.sharesAtRisk} />
+              <SharesAtRiskWidget sharesAtRisk={portfolioCalculations.portfolioVal.sharesAtRisk} /> */}
             </div>
           </div>
 

@@ -39,8 +39,16 @@ export class RobinhoodCsvParser {
       notes: row['Description'],
       isOption: false,
     }
+    console.log('Activity', activity.type, row['Description'])
 
+    // Try to parse as regular option contract first
     if (RobinhoodCsvParser.tryParseOptionContract(row['Description'], activity)) {
+      activity.isOption = true
+    }
+    // If it's an expired option, try parsing the expiration description format
+    else if (activity.type === ActivityType.Expired && 
+             RobinhoodCsvParser.tryParseExpirationDescription(row['Description'], activity)) {
+      console.log('Expiration description parsed', row['Description'])
       activity.isOption = true
     }
 
@@ -113,6 +121,26 @@ export class RobinhoodCsvParser {
     }
   }
 
+  private static tryParseExpirationDescription(
+    description: string,
+    activity: TradeActivity
+  ): boolean {
+    if (!description || description.trim() === '') return false
+
+    // Expected prefix in Robinhood's "expiration" rows
+    const prefix = 'Option Expiration for '
+    
+    // Check if description starts with the expected prefix
+    if (!description.toLowerCase().startsWith(prefix.toLowerCase())) {
+      return false
+    }
+
+    // Strip the prefix and delegate to the existing contract parser
+    const contractPart = description.substring(prefix.length).trim()
+    
+    return RobinhoodCsvParser.tryParseOptionContract(contractPart, activity)
+  }
+
   private static mapActivityType(code: string, description: string): ActivityType {
     const cleanCode = code?.trim().toUpperCase() || ''
     const cleanDescription = description?.toLowerCase() || ''
@@ -130,6 +158,8 @@ export class RobinhoodCsvParser {
         return ActivityType.Assignment
       case 'EXP':
         return ActivityType.Expired
+        case 'OEXP':
+            return ActivityType.Expired
       case 'DIV':
         return ActivityType.Dividend
       case 'INT':
@@ -140,6 +170,7 @@ export class RobinhoodCsvParser {
         // Check description for additional context
         if (cleanDescription.includes('assignment')) return ActivityType.Assignment
         if (cleanDescription.includes('expire')) return ActivityType.Expired
+        if (cleanDescription.includes('expiration')) return ActivityType.Expired
         if (cleanDescription.includes('dividend')) return ActivityType.Dividend
         return ActivityType.Unknown
     }

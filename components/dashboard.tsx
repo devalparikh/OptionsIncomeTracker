@@ -154,14 +154,17 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   }, [legs])
 
   const portfolioMetrics = useMemo(() => {
-    const totalPremium = legs.reduce((sum, leg) => sum + calculatePremiumIncome(leg.open_price, leg.contracts, 0), 0)
+    console.log("legs:");
+    console.log(legs[legs.length - 1]);
+
+    const totalPremium = legs.reduce((sum, leg) => sum + calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0), 0)
 
     const totalCapitalAtRisk = openLegs
       .filter((leg) => leg.type === "PUT")
       .reduce((sum, leg) => sum + calculateCapitalAtRisk(leg.strike, leg.contracts), 0)
 
     const realizedPL = allClosedLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       const closePL = leg.close_price
         ? (leg.side === "SELL" ? -1 : 1) * (leg.close_price - leg.open_price) * 100 * leg.contracts
         : 0
@@ -169,14 +172,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     }, 0)
 
     const unrealizedPL = openLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
       return sum + premium
     }, 0)
 
     // Calculate projected monthly income based on current open positions
     const projectedMonthlyIncome = openLegs.reduce((sum, leg) => {
       const daysToExpiry = Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
       const monthlyRate = daysToExpiry > 0 ? (premium / daysToExpiry) * 30 : 0
       return sum + monthlyRate
     }, 0)
@@ -219,7 +222,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     let cumulativeValue = 10000
 
     sortedLegs.forEach((leg, index) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       cumulativePremium += premium
       cumulativeValue += premium
 
@@ -375,7 +378,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
+            {/* <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Premium</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -384,12 +387,12 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                 <div className="text-2xl font-bold text-foreground">${portfolioMetrics.totalPremium.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">Gross premium collected</p>
               </CardContent>
-            </Card>
+            </Card> */}
 
             <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Net P/L</CardTitle>
-                {portfolioMetrics.netPL >= 0 ? (
+                {portfolioMetrics.totalPremium >= 0 ? (
                   <TrendingUp className="h-4 w-4 text-green-600" />
                 ) : (
                   <TrendingDown className="h-4 w-4 text-red-600" />
@@ -397,9 +400,9 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               </CardHeader>
               <CardContent>
                 <div
-                  className={`text-2xl font-bold ${portfolioMetrics.netPL >= 0 ? "text-green-600" : "text-red-600"}`}
+                  className={`text-2xl font-bold ${portfolioMetrics.totalPremium >= 0 ? "text-green-600" : "text-red-600"}`}
                 >
-                  ${portfolioMetrics.netPL.toFixed(2)}
+                  ${portfolioMetrics.totalPremium.toFixed(2)}
                 </div>
                 <p className="text-xs text-muted-foreground">Total profit/loss</p>
               </CardContent>
@@ -592,10 +595,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                           </TableHeader>
                           <TableBody>
                             {allClosedLegs.map((leg) => {
-                              // console.log("legggg:");
-                              // console.log(leg);
                               const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
-                              const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+                              const openPremium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
                               const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
                               const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium
                               const collateral =

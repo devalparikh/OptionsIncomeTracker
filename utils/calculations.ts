@@ -4,8 +4,8 @@ export function calculateContractNotional(strike: number, contracts: number): nu
   return strike * 100 * contracts
 }
 
-export function calculatePremiumIncome(openPrice: number, contracts: number, commissions = 0): number {
-  return openPrice * 100 * contracts
+export function calculatePremiumIncome(realized_pnl: number, contracts: number, commissions = 0): number {
+  return realized_pnl * contracts
 }
 
 export function calculateCapitalAtRisk(strike: number, contracts: number): number {

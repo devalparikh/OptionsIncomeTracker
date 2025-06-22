@@ -131,18 +131,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
   // Separate legs into open, expired, and closed
   const openLegs = legs.filter((leg) => !leg.closeDate && !isExpired(leg.expiry))
-  const expiredLegs = legs.filter((leg) => !leg.closeDate && isExpired(leg.expiry))
   const closedLegs = legs.filter((leg) => leg.closeDate)
 
   console.log("openLegs:");
   console.log(openLegs);
   console.log("closedLegs:");
   console.log(closedLegs);
-  console.log("expiredLegs:");
-  console.log(expiredLegs);
-
   // Combine expired and closed legs for the closed tab
-  const allClosedLegs = [...closedLegs, ...expiredLegs]
+  const allClosedLegs = [...closedLegs]
 
   // Group legs by position for analysis
   const positionGroups = useMemo(() => {

@@ -12,7 +12,7 @@ import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
 import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
-import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
 import { PortfolioValueWidget } from "./portfolio-value-widget"
@@ -163,6 +163,35 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       .filter((leg) => leg.type === "PUT")
       .reduce((sum, leg) => sum + calculateCapitalAtRisk(leg.strike, leg.contracts), 0)
 
+    // Calculate shares at risk (only shares with open covered calls)
+    const sharesAtRiskData = stockPositions.reduce((acc, position) => {
+      // Find any covered calls for this position
+      const coveredCalls = legs.filter(
+        leg => leg.symbol === position.symbol && 
+        leg.type === "CALL" && 
+        leg.side === "SELL" && 
+        !leg.closeDate && 
+        !leg.is_assigned
+      )
+
+      // Only include shares if they have open covered calls
+      if (coveredCalls.length > 0) {
+        const quote = stockQuotes.get(position.symbol)
+        const currentPrice = quote?.price || position.current_price
+        const marketValue = position.quantity * currentPrice
+        
+        return {
+          shares: acc.shares + position.quantity,
+          dollarValue: acc.dollarValue + marketValue
+        }
+      }
+      
+      return acc
+    }, { shares: 0, dollarValue: 0 })
+
+    const totalSharesAtRisk = sharesAtRiskData.shares
+    const totalSharesAtRiskValue = sharesAtRiskData.dollarValue
+
     const realizedPL = allClosedLegs.reduce((sum, leg) => {
       const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       const closePL = leg.close_price
@@ -178,21 +207,50 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
     // Calculate projected monthly income based on current open positions
     const projectedMonthlyIncome = openLegs.reduce((sum, leg) => {
-      const daysToExpiry = Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
+      const totalDaysHeld = Math.ceil((leg.expiry.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
       const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
-      const monthlyRate = daysToExpiry > 0 ? (premium / daysToExpiry) * 30 : 0
+      const monthlyRate = totalDaysHeld > 0 ? (premium / totalDaysHeld) * 30 : 0
       return sum + monthlyRate
     }, 0)
+
+    // Calculate historical average monthly income based on closed options
+    const historicalAverageMonthlyIncome = (() => {
+      if (allClosedLegs.length === 0) return 0
+
+      // Get the date range of closed positions
+      const closedDates = allClosedLegs.map(leg => leg.closeDate || leg.expiry).filter(Boolean) as Date[]
+      if (closedDates.length === 0) return 0
+
+      const earliestDate = new Date(Math.min(...closedDates.map(d => d.getTime())))
+      const latestDate = new Date(Math.max(...closedDates.map(d => d.getTime())))
+      
+      // Calculate total months between earliest and latest closed position
+      const monthsDiff = (latestDate.getFullYear() - earliestDate.getFullYear()) * 12 + 
+                        (latestDate.getMonth() - earliestDate.getMonth()) + 1
+      
+      // Use at least 1 month to avoid division by zero
+      const totalMonths = Math.max(1, monthsDiff)
+      
+      // Calculate total realized PnL from closed options
+      const totalRealizedPnL = allClosedLegs.reduce((sum, leg) => {
+        return sum + (leg.realized_pnl || 0)
+      }, 0)
+      
+      return totalRealizedPnL / totalMonths
+    })()
 
     return {
       totalPremium,
       totalCapitalAtRisk,
+      totalSharesAtRisk,
+      totalSharesAtRiskValue,
       realizedPL,
       unrealizedPL,
       netPL: realizedPL + unrealizedPL,
       projectedMonthlyIncome,
+      historicalAverageMonthlyIncome,
     }
-  }, [legs, openLegs])
+  }, [legs, openLegs, allClosedLegs, stockPositions, stockQuotes])
 
   // Add portfolio calculations in the useMemo section (after portfolioMetrics)
   const portfolioCalculations = useMemo(() => {
@@ -378,7 +436,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           </div>
           <h1 className="text-3xl font-bold">Options</h1>
           {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
             {/* <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Premium</CardTitle>
@@ -424,6 +482,19 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
             <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Historical Monthly</CardTitle>
+                <TrendingUp className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  ${portfolioMetrics.historicalAverageMonthlyIncome.toFixed(2)}
+                </div>
+                <p className="text-xs text-muted-foreground">Based on closed options</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Capital at Risk</CardTitle>
                 <Target className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
@@ -432,6 +503,21 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   ${portfolioMetrics.totalCapitalAtRisk.toLocaleString()}
                 </div>
                 <p className="text-xs text-muted-foreground">Open put positions</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Shares at Risk</CardTitle>
+                <Share className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-foreground">
+                  ${portfolioMetrics.totalSharesAtRiskValue.toLocaleString()}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {portfolioMetrics.totalSharesAtRisk.toLocaleString()} shares with covered calls
+                </p>
               </CardContent>
             </Card>
 
@@ -597,9 +683,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                           <TableBody>
                             {allClosedLegs.map((leg) => {
                               const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
-                              const openPremium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
-                              const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
-                              const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium
+                              const netPL = leg.realized_pnl || 0
                               const collateral =
                                 leg.type === "PUT"
                                   ? calculateCapitalAtRisk(leg.strike, leg.contracts)

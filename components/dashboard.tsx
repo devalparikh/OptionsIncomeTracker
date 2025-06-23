@@ -192,6 +192,13 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     const totalSharesAtRisk = sharesAtRiskData.shares
     const totalSharesAtRiskValue = sharesAtRiskData.dollarValue
 
+    // Calculate total value of all open shares (including those without covered calls)
+    const totalOpenSharesValue = stockPositions.reduce((sum, position) => {
+      const quote = stockQuotes.get(position.symbol)
+      const currentPrice = quote?.price || position.current_price
+      return sum + (position.quantity * currentPrice)
+    }, 0)
+
     const realizedPL = allClosedLegs.reduce((sum, leg) => {
       const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       const closePL = leg.close_price
@@ -244,6 +251,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       totalCapitalAtRisk,
       totalSharesAtRisk,
       totalSharesAtRiskValue,
+      totalOpenSharesValue,
       realizedPL,
       unrealizedPL,
       netPL: realizedPL + unrealizedPL,
@@ -419,6 +427,36 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           <h1 className="text-3xl font-bold">Overall</h1>
           {/* Market Data Updater */}
           <MarketDataUpdater />
+
+          {/* Portfolio Value Widget */}
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-foreground">Portfolio Value</CardTitle>
+              <p className="text-sm text-muted-foreground">Total value of all positions and collateral</p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-foreground">
+                    ${(portfolioMetrics.totalOpenSharesValue + portfolioMetrics.totalCapitalAtRisk).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Total Portfolio Value</p>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">
+                    ${portfolioMetrics.totalOpenSharesValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Total Open Shares</p>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold">
+                    ${portfolioMetrics.totalCapitalAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Total Capital Collateral</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Replace the existing Portfolio Performance Chart section with: */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

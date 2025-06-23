@@ -11,7 +11,7 @@ import { MarketDataUpdater } from "./market-data-updater"
 import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
-import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI } from "@/utils/calculations"
+import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
 import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
@@ -24,6 +24,7 @@ import { createClient } from "@/lib/supabase/client"
 import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 import { getStockQuotes } from "@/app/actions/market-data"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { StockTradesTable } from "./StockTradesTable"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -77,6 +78,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       console.error("Error fetching stock positions:", error)
       return
     }
+    console.log("positions:");
+    console.log(positions);
     if (positions) {
       setStockPositions(positions)
     }
@@ -131,11 +134,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
   // Separate legs into open, expired, and closed
   const openLegs = legs.filter((leg) => !leg.closeDate && !isExpired(leg.expiry))
-  const expiredLegs = legs.filter((leg) => !leg.closeDate && isExpired(leg.expiry))
   const closedLegs = legs.filter((leg) => leg.closeDate)
 
+  console.log("openLegs:");
+  console.log(openLegs);
+  console.log("closedLegs:");
+  console.log(closedLegs);
   // Combine expired and closed legs for the closed tab
-  const allClosedLegs = [...closedLegs, ...expiredLegs]
+  const allClosedLegs = [...closedLegs]
 
   // Group legs by position for analysis
   const positionGroups = useMemo(() => {
@@ -151,14 +157,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   }, [legs])
 
   const portfolioMetrics = useMemo(() => {
-    const totalPremium = legs.reduce((sum, leg) => sum + calculatePremiumIncome(leg.open_price, leg.contracts, 0), 0)
+    const totalPremium = legs.reduce((sum, leg) => sum + calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0), 0)
 
     const totalCapitalAtRisk = openLegs
       .filter((leg) => leg.type === "PUT")
       .reduce((sum, leg) => sum + calculateCapitalAtRisk(leg.strike, leg.contracts), 0)
 
     const realizedPL = allClosedLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       const closePL = leg.close_price
         ? (leg.side === "SELL" ? -1 : 1) * (leg.close_price - leg.open_price) * 100 * leg.contracts
         : 0
@@ -166,14 +172,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     }, 0)
 
     const unrealizedPL = openLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
       return sum + premium
     }, 0)
 
     // Calculate projected monthly income based on current open positions
     const projectedMonthlyIncome = openLegs.reduce((sum, leg) => {
       const daysToExpiry = Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
       const monthlyRate = daysToExpiry > 0 ? (premium / daysToExpiry) * 30 : 0
       return sum + monthlyRate
     }, 0)
@@ -216,7 +222,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     let cumulativeValue = 10000
 
     sortedLegs.forEach((leg, index) => {
-      const premium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+      const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       cumulativePremium += premium
       cumulativeValue += premium
 
@@ -352,27 +358,28 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       {/* Main Content with top padding for fixed navbar */}
       <div className="pt-20 pb-8">
         <div className="container mx-auto px-6 space-y-8">
+          <h1 className="text-3xl font-bold">Overall</h1>
           {/* Market Data Updater */}
           <MarketDataUpdater />
 
           {/* Replace the existing Portfolio Performance Chart section with: */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2">
-              <RobinhoodStyleChart data={portfolioCalculations.performanceData} className="h-full" />
+              {/* <RobinhoodStyleChart data={portfolioCalculations.performanceData} className="h-full" /> */}
             </div>
             <div className="space-y-4">
-              <PortfolioValueWidget
+              {/* <PortfolioValueWidget
                 portfolioValue={portfolioCalculations.portfolioVal}
                 loading={loading}
                 onRefresh={refetch}
               />
-              <SharesAtRiskWidget sharesAtRisk={portfolioCalculations.portfolioVal.sharesAtRisk} />
+              <SharesAtRiskWidget sharesAtRisk={portfolioCalculations.portfolioVal.sharesAtRisk} /> */}
             </div>
           </div>
-
+          <h1 className="text-3xl font-bold">Options</h1>
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-            <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
+            {/* <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Premium</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -381,12 +388,12 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                 <div className="text-2xl font-bold text-foreground">${portfolioMetrics.totalPremium.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">Gross premium collected</p>
               </CardContent>
-            </Card>
+            </Card> */}
 
             <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Net P/L</CardTitle>
-                {portfolioMetrics.netPL >= 0 ? (
+                {portfolioMetrics.totalPremium >= 0 ? (
                   <TrendingUp className="h-4 w-4 text-green-600" />
                 ) : (
                   <TrendingDown className="h-4 w-4 text-red-600" />
@@ -394,9 +401,9 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               </CardHeader>
               <CardContent>
                 <div
-                  className={`text-2xl font-bold ${portfolioMetrics.netPL >= 0 ? "text-green-600" : "text-red-600"}`}
+                  className={`text-2xl font-bold ${portfolioMetrics.totalPremium >= 0 ? "text-green-600" : "text-red-600"}`}
                 >
-                  ${portfolioMetrics.netPL.toFixed(2)}
+                  ${portfolioMetrics.totalPremium.toFixed(2)}
                 </div>
                 <p className="text-xs text-muted-foreground">Total profit/loss</p>
               </CardContent>
@@ -590,7 +597,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                           <TableBody>
                             {allClosedLegs.map((leg) => {
                               const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
-                              const openPremium = calculatePremiumIncome(leg.open_price, leg.contracts, 0)
+                              const openPremium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
                               const closeCost = leg.close_price ? leg.close_price * 100 * leg.contracts : 0
                               const netPL = leg.side === "SELL" ? openPremium - closeCost : closeCost - openPremium
                               const collateral =
@@ -600,11 +607,11 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                               // TODO: Properly handle ROI calculations for covered calls
                               // Currently hiding ROI for covered calls as it requires share cost basis
                               // and proper handling of assignment scenarios
-                              const roi = leg.type === "PUT" ? calculateLegROI(netPL, collateral) : 0
+                              const roi = calculateLegROI(netPL, collateral)
                               const closeOrExpiryDate = leg.closeDate || leg.expiry
-                              const daysOpen = Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24))
-                              const roiPerDay = leg.type === "PUT" && daysOpen > 0 ? roi / daysOpen : 0
-                              const monthlyROI = leg.type === "PUT" ? (daysOpen < 30 ? roiPerDay * 30 : roi) : 0
+                              const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+                              const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
+                              const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
 
                               return (
                                 <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
@@ -638,8 +645,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                     {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
                                   </TableCell>
                                   <TableCell className="whitespace-nowrap">
-                                    <Badge variant={isExpiredContract ? "secondary" : "outline"}>
-                                      {isExpiredContract ? "Expired" : leg.is_assigned ? "Assigned" : "Closed"}
+                                    <Badge variant={
+                                      leg.is_assigned ? "destructive" : 
+                                      leg.is_exercised ? "secondary" : 
+                                      "outline"
+                                    }>
+                                      {leg.is_assigned ? "Assigned" : 
+                                       leg.is_exercised ? "Expired" : 
+                                       "Closed"}
                                     </Badge>
                                   </TableCell>
                                 </TableRow>
@@ -671,8 +684,11 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               </div>
             </TabsContent>
           </Tabs>
+          <h1 className="text-3xl font-bold">Stocks</h1>
+          <StockTradesTable />
         </div>
       </div>
+      
     </div>
   )
 }

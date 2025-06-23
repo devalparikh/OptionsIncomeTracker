@@ -62,7 +62,7 @@ export function CoveredCallSharesTable({ positions, loading, onRefresh }: Covere
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-base font-medium">Covered Call Share Positions</CardTitle>
+        <CardTitle className="text-base font-medium">Open Covered Call Share Positions</CardTitle>
         {onRefresh && (
           <Button variant="ghost" size="icon" onClick={onRefresh} disabled={loading}>
             <RefreshCw className="h-4 w-4" />

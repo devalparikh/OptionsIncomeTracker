@@ -92,13 +92,13 @@ export async function getLegsServer(): Promise<LegWithPosition[]> {
 
     // Step 5: Combine legs with position symbols
     return legs.map((leg) => {
-      const position = positions.find((p) => p.id === leg.position_id)
+      const position = positions.find((p) => p.id === (leg as any).position_id)
       return {
         ...leg,
         symbol: position?.symbol || "UNKNOWN",
-        expiry: new Date(leg.expiry),
-        openDate: new Date(leg.open_date),
-        closeDate: leg.close_date ? new Date(leg.close_date) : undefined,
+        expiry: new Date((leg as any).expiry),
+        openDate: new Date((leg as any).open_date),
+        closeDate: (leg as any).close_date ? new Date((leg as any).close_date) : undefined,
       }
     })
   } catch (error) {
@@ -185,13 +185,13 @@ export async function getLegsClient(): Promise<LegWithPosition[]> {
 
     // Step 5: Combine legs with position symbols
     return legs.map((leg) => {
-      const position = positions.find((p) => p.id === leg.position_id)
+      const position = positions.find((p) => p.id === (leg as any).position_id)
       return {
         ...leg,
         symbol: position?.symbol || "UNKNOWN",
-        expiry: new Date(leg.expiry),
-        openDate: new Date(leg.open_date),
-        closeDate: leg.close_date ? new Date(leg.close_date) : undefined,
+        expiry: new Date((leg as any).expiry),
+        openDate: new Date((leg as any).open_date),
+        closeDate: (leg as any).close_date ? new Date((leg as any).close_date) : undefined,
       }
     })
   } catch (error) {

@@ -67,14 +67,15 @@ export async function purgeUserData() {
       return { success: false, error: `Error deleting positions: ${positionsError.message}` }
     }
 
-    const { error: portfoliosError } = await supabase
-      .from("portfolios")
-      .delete()
-      .in("account_id", accountIds)
+    // leave out for now
+    // const { error: portfoliosError } = await supabase
+    //   .from("portfolios")
+    //   .delete()
+    //   .in("account_id", accountIds)
 
-    if (portfoliosError) {
-      return { success: false, error: `Error deleting portfolios: ${portfoliosError.message}` }
-    }
+    // if (portfoliosError) {
+    //   return { success: false, error: `Error deleting portfolios: ${portfoliosError.message}` }
+    // }
 
     // const { error: accountsError } = await supabase
     //   .from("accounts")

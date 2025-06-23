@@ -517,7 +517,7 @@ async function createOrUpdateStockPosition(trade: any, portfolioId: string, supa
     }
 
     // Record the sell trade
-    const { error: sellTradeError } = await supabase
+    const { data: sellTrade, error: sellTradeError } = await supabase
       .from('stock_trades')
       .insert({
         position_id: positionId,
@@ -529,9 +529,49 @@ async function createOrUpdateStockPosition(trade: any, portfolioId: string, supa
         is_closed: true,
         commissions: 0,
       })
+      .select('id')
+      .single()
 
     if (sellTradeError) {
       throw new Error(`Failed to record sell trade: ${sellTradeError.message}`)
+    }
+
+    // Create stock_trade_pairs records for each buy lot that was closed
+    let processedQuantity = 0
+    for (const lot of openLots) {
+      if (processedQuantity >= quantity) break
+
+      const lotSellQty = Math.min(quantity - processedQuantity, lot.quantity)
+      const lotCostBasis = lot.price
+      const salePrice = trade.price || 0
+      const proceeds = salePrice * lotSellQty
+      const cost = lotCostBasis * lotSellQty
+      const lotRealizedPnL = proceeds - cost
+
+      // Create trade pair record
+      const { error: pairError } = await supabase
+        .from('stock_trade_pairs')
+        .insert({
+          portfolio_id: portfolioId,
+          symbol: trade.symbol,
+          buy_trade_id: lot.id,
+          sell_trade_id: sellTrade.id,
+          quantity: lotSellQty,
+          bought_price: lotCostBasis,
+          sold_price: salePrice,
+          bought_date: lot.trade_date,
+          sold_date: trade.date.toISOString().split('T')[0],
+          realized_pnl: lotRealizedPnL,
+          total_proceeds: proceeds,
+          total_cost: cost,
+          commissions: 0, // Could be calculated from individual trades
+        })
+
+      if (pairError) {
+        throw new Error(`Failed to create trade pair: ${pairError.message}`)
+      }
+
+      processedQuantity += lotSellQty
     }
 
     // Update position quantity

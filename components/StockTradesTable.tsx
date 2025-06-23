@@ -20,6 +20,10 @@ interface StockTrade {
   positions: {
     symbol: string
   }
+  open_date?: string
+  bought_price?: number
+  sold_price?: number
+  proceeds?: number
 }
 
 interface StockTradesData {
@@ -46,7 +50,7 @@ export function StockTradesTable() {
   const fetchStockTrades = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/stock-trades-simple')
+      const response = await fetch('/api/stock-trades-pairs')
       
       if (!response.ok) {
         throw new Error('Failed to fetch stock trades')
@@ -195,9 +199,11 @@ export function StockTradesTable() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Symbol</TableHead>
-                  <TableHead>Date</TableHead>
+                  <TableHead>Open Date</TableHead>
+                  <TableHead>Close Date</TableHead>
                   <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Bought Price</TableHead>
+                  <TableHead className="text-right">Sold Price</TableHead>
                   <TableHead className="text-right">Proceeds</TableHead>
                   <TableHead className="text-right">Realized PnL</TableHead>
                   <TableHead className="text-right">Return %</TableHead>
@@ -206,8 +212,7 @@ export function StockTradesTable() {
               </TableHeader>
               <TableBody>
                 {data.soldTrades.map((trade) => {
-                  const proceeds = trade.price * trade.quantity
-                  const returnPercentage = formatPercentage(trade.realized_pnl, proceeds)
+                  const returnPercentage = formatPercentage(trade.realized_pnl, trade.proceeds || 0)
                   
                   return (
                     <TableRow key={trade.id}>
@@ -215,16 +220,22 @@ export function StockTradesTable() {
                         {trade.positions.symbol}
                       </TableCell>
                       <TableCell>
-                        {formatDate(trade.trade_date)}
+                        {trade.open_date ? formatDate(trade.open_date) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {trade.close_date ? formatDate(trade.close_date) : '-'}
                       </TableCell>
                       <TableCell className="text-right">
                         {formatQuantity(trade.quantity)}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatCurrency(trade.price)}
+                        {trade.bought_price !== undefined && trade.bought_price !== null ? formatCurrency(trade.bought_price) : '-'}
                       </TableCell>
                       <TableCell className="text-right">
-                        {formatCurrency(proceeds)}
+                        {trade.sold_price !== undefined && trade.sold_price !== null ? formatCurrency(trade.sold_price) : '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(trade.proceeds || 0)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Badge 

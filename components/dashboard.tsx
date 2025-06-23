@@ -358,6 +358,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       {/* Main Content with top padding for fixed navbar */}
       <div className="pt-20 pb-8">
         <div className="container mx-auto px-6 space-y-8">
+          <h1 className="text-3xl font-bold">Overall</h1>
           {/* Market Data Updater */}
           <MarketDataUpdater />
 
@@ -375,7 +376,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               <SharesAtRiskWidget sharesAtRisk={portfolioCalculations.portfolioVal.sharesAtRisk} /> */}
             </div>
           </div>
-
+          <h1 className="text-3xl font-bold">Options</h1>
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
             {/* <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-200">
@@ -683,6 +684,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               </div>
             </TabsContent>
           </Tabs>
+          <h1 className="text-3xl font-bold">Stocks</h1>
+          <StockTradesTable />
         </div>
       </div>
       

@@ -24,6 +24,7 @@ import { createClient } from "@/lib/supabase/client"
 import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 import { getStockQuotes } from "@/app/actions/market-data"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { StockTradesTable } from "./StockTradesTable"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -77,6 +78,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       console.error("Error fetching stock positions:", error)
       return
     }
+    console.log("positions:");
+    console.log(positions);
     if (positions) {
       setStockPositions(positions)
     }
@@ -154,9 +157,6 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   }, [legs])
 
   const portfolioMetrics = useMemo(() => {
-    console.log("legs:");
-    console.log(legs[legs.length - 1]);
-
     const totalPremium = legs.reduce((sum, leg) => sum + calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0), 0)
 
     const totalCapitalAtRisk = openLegs
@@ -685,6 +685,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           </Tabs>
         </div>
       </div>
+      
     </div>
   )
 }

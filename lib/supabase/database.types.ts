@@ -122,6 +122,97 @@ export interface Database {
           updated_at?: string
         }
       }
+      stock_trades: {
+        Row: {
+          id: string
+          position_id: string
+          side: "BUY" | "SELL"
+          quantity: number
+          price: number
+          trade_date: string
+          close_date: string | null
+          close_price: number | null
+          realized_pnl: number
+          is_closed: boolean
+          commissions: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          position_id: string
+          side: "BUY" | "SELL"
+          quantity: number
+          price: number
+          trade_date: string
+          close_date?: string | null
+          close_price?: number | null
+          realized_pnl?: number
+          is_closed?: boolean
+          commissions?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          position_id?: string
+          side?: "BUY" | "SELL"
+          quantity?: number
+          price?: number
+          trade_date?: string
+          close_date?: string | null
+          close_price?: number | null
+          realized_pnl?: number
+          is_closed?: boolean
+          commissions?: number
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      closed_stock_positions: {
+        Row: {
+          id: string
+          portfolio_id: string
+          symbol: string
+          total_quantity: number
+          total_cost_basis: number
+          total_proceeds: number
+          total_realized_pnl: number
+          first_buy_date: string
+          last_sell_date: string
+          trade_count: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          portfolio_id: string
+          symbol: string
+          total_quantity: number
+          total_cost_basis: number
+          total_proceeds: number
+          total_realized_pnl: number
+          first_buy_date: string
+          last_sell_date: string
+          trade_count: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          portfolio_id?: string
+          symbol?: string
+          total_quantity?: number
+          total_cost_basis?: number
+          total_proceeds?: number
+          total_realized_pnl?: number
+          first_buy_date?: string
+          last_sell_date?: string
+          trade_count?: number
+          created_at?: string
+          updated_at?: string
+        }
+      }
       legs: {
         Row: {
           id: string

@@ -335,9 +335,13 @@ async function createOrUpdateStockPosition(trade: any, portfolioId: string, supa
     throw new Error(`Failed to check existing position: ${selectError.message}`)
   }
 
+  let positionId: string
+
   if (isBuy) {
     // Buying stock
     if (existingPosition) {
+      positionId = existingPosition.id
+      
       // Update existing position with weighted average cost basis
       const existingQuantity = existingPosition.quantity || 0
       const existingCostBasis = existingPosition.cost_basis || 0
@@ -362,7 +366,7 @@ async function createOrUpdateStockPosition(trade: any, portfolioId: string, supa
       }
     } else {
       // Create new position
-      const { error: insertError } = await supabase
+      const { data: newPosition, error: insertError } = await supabase
         .from('positions')
         .insert({
           portfolio_id: portfolioId,
@@ -372,46 +376,197 @@ async function createOrUpdateStockPosition(trade: any, portfolioId: string, supa
           cost_basis: trade.price || 0,
           current_price: null,
         })
+        .select('id')
+        .single()
 
       if (insertError) {
         throw new Error(`Failed to create position: ${insertError.message}`)
       }
+
+      if (!newPosition) {
+        throw new Error('Failed to create position: No data returned')
+      }
+
+      positionId = newPosition.id
+    }
+
+    // Record the buy trade
+    const { error: tradeError } = await supabase
+      .from('stock_trades')
+      .insert({
+        position_id: positionId,
+        side: 'BUY',
+        quantity: quantity,
+        price: trade.price || 0,
+        trade_date: trade.date.toISOString().split('T')[0],
+        commissions: 0, // Could be calculated from amount vs price*quantity
+      })
+
+    if (tradeError) {
+      throw new Error(`Failed to record buy trade: ${tradeError.message}`)
     }
   } else {
     // Selling stock
-    if (existingPosition) {
-      const remainingQuantity = (existingPosition.quantity || 0) - quantity
-      
-      if (remainingQuantity < 0) {
-        throw new Error(`Insufficient shares to sell for ${trade.symbol}`)
-      }
-
-      // Calculate realized PnL for the sold shares
-      const soldQuantity = quantity
-      const costBasis = existingPosition.cost_basis || 0
-      const salePrice = trade.price || 0
-      const realizedPnL = (salePrice - costBasis) * soldQuantity
-
-      const { error: updateError } = await supabase
-        .from('positions')
-        .update({
-          quantity: remainingQuantity,
-          // Keep the same cost basis for remaining shares
-        })
-        .eq('id', existingPosition.id)
-
-      if (updateError) {
-        throw new Error(`Failed to update position: ${updateError.message}`)
-      }
-
-      // Note: In a more sophisticated implementation, you might want to track realized PnL
-      // at the portfolio level or in a separate trades table. For now, we're just
-      // calculating it but not storing it since the positions table doesn't have
-      // a realized_pnl field for stocks.
-      
-      console.log(`Realized PnL for ${trade.symbol} sale: $${realizedPnL.toFixed(2)}`)
-    } else {
+    if (!existingPosition) {
       throw new Error(`No position found to sell for ${trade.symbol}`)
     }
+
+    positionId = existingPosition.id
+    const remainingQuantity = (existingPosition.quantity || 0) - quantity
+    
+    if (remainingQuantity < 0) {
+      throw new Error(`Insufficient shares to sell for ${trade.symbol}`)
+    }
+
+    // Get open buy lots (FIFO order)
+    const { data: openLots, error: lotsError } = await supabase
+      .from('stock_trades')
+      .select('id, quantity, price, trade_date')
+      .eq('position_id', positionId)
+      .eq('side', 'BUY')
+      .eq('is_closed', false)
+      .order('trade_date', { ascending: true })
+
+    if (lotsError) {
+      throw new Error(`Failed to get open lots: ${lotsError.message}`)
+    }
+
+    if (!openLots || openLots.length === 0) {
+      throw new Error(`No open lots found for ${trade.symbol}`)
+    }
+
+    // Process FIFO sell logic
+    let remainingToSell = quantity
+    let totalRealizedPnL = 0
+    let totalCostBasis = 0
+    let totalProceeds = 0
+    let firstBuyDate: string | null = null
+    let lastSellDate = trade.date.toISOString().split('T')[0]
+    let tradeCount = 0
+
+    for (const lot of openLots) {
+      if (remainingToSell <= 0) break
+
+      const lotSellQty = Math.min(remainingToSell, lot.quantity)
+      const lotCostBasis = lot.price
+      const salePrice = trade.price || 0
+      const proceeds = salePrice * lotSellQty
+      const cost = lotCostBasis * lotSellQty
+      const lotRealizedPnL = proceeds - cost
+
+      totalRealizedPnL += lotRealizedPnL
+      totalCostBasis += cost
+      totalProceeds += proceeds
+      tradeCount++
+
+      if (!firstBuyDate) {
+        firstBuyDate = lot.trade_date
+      }
+
+      // Update the lot
+      if (lotSellQty === lot.quantity) {
+        // Entire lot sold
+        const { error: updateLotError } = await supabase
+          .from('stock_trades')
+          .update({
+            close_date: lastSellDate,
+            close_price: salePrice,
+            realized_pnl: lotRealizedPnL,
+            is_closed: true,
+          })
+          .eq('id', lot.id)
+
+        if (updateLotError) {
+          throw new Error(`Failed to update lot: ${updateLotError.message}`)
+        }
+      } else {
+        // Partial lot sold
+        const { error: updateLotError } = await supabase
+          .from('stock_trades')
+          .update({
+            quantity: lot.quantity - lotSellQty,
+            close_date: lastSellDate,
+            close_price: salePrice,
+            realized_pnl: lotRealizedPnL,
+            is_closed: true,
+          })
+          .eq('id', lot.id)
+
+        if (updateLotError) {
+          throw new Error(`Failed to update lot: ${updateLotError.message}`)
+        }
+
+        // Create a new lot for the remaining quantity
+        const { error: insertRemainingError } = await supabase
+          .from('stock_trades')
+          .insert({
+            position_id: positionId,
+            side: 'BUY',
+            quantity: lot.quantity - lotSellQty,
+            price: lot.price,
+            trade_date: lot.trade_date,
+            commissions: 0,
+          })
+
+        if (insertRemainingError) {
+          throw new Error(`Failed to create remaining lot: ${insertRemainingError.message}`)
+        }
+      }
+
+      remainingToSell -= lotSellQty
+    }
+
+    // Record the sell trade
+    const { error: sellTradeError } = await supabase
+      .from('stock_trades')
+      .insert({
+        position_id: positionId,
+        side: 'SELL',
+        quantity: quantity,
+        price: trade.price || 0,
+        trade_date: trade.date.toISOString().split('T')[0],
+        realized_pnl: totalRealizedPnL,
+        is_closed: true,
+        commissions: 0,
+      })
+
+    if (sellTradeError) {
+      throw new Error(`Failed to record sell trade: ${sellTradeError.message}`)
+    }
+
+    // Update position quantity
+    const { error: updatePositionError } = await supabase
+      .from('positions')
+      .update({
+        quantity: remainingQuantity,
+      })
+      .eq('id', positionId)
+
+    if (updatePositionError) {
+      throw new Error(`Failed to update position: ${updatePositionError.message}`)
+    }
+
+    // If position is fully closed (quantity = 0), create closed_stock_position record
+    if (remainingQuantity === 0 && firstBuyDate) {
+      const { error: closedPositionError } = await supabase
+        .from('closed_stock_positions')
+        .insert({
+          portfolio_id: portfolioId,
+          symbol: trade.symbol,
+          total_quantity: quantity,
+          total_cost_basis: totalCostBasis,
+          total_proceeds: totalProceeds,
+          total_realized_pnl: totalRealizedPnL,
+          first_buy_date: firstBuyDate,
+          last_sell_date: lastSellDate,
+          trade_count: tradeCount + 1, // +1 for the sell trade
+        })
+
+      if (closedPositionError) {
+        throw new Error(`Failed to create closed position record: ${closedPositionError.message}`)
+      }
+    }
+
+    console.log(`Realized PnL for ${trade.symbol} sale: $${totalRealizedPnL.toFixed(2)}`)
   }
 } 

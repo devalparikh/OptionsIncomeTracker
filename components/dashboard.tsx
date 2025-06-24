@@ -725,7 +725,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                               const collateral =
                                 leg.type === "PUT"
                                   ? calculateCapitalAtRisk(leg.strike, leg.contracts)
-                                  : leg.open_price * 100 * leg.contracts
+                                  : leg.strike * 100 * leg.contracts
                               // TODO: Properly handle ROI calculations for covered calls
                               // Currently hiding ROI for covered calls as it requires share cost basis
                               // and proper handling of assignment scenarios
@@ -751,10 +751,10 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                     ${netPL.toFixed(2)}
                                   </TableCell>
                                   <TableCell className={`whitespace-nowrap ${roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" ? `${roiPerDay.toFixed(2)}%` : "-"}
+                                    {leg.type === "PUT" || leg.type === "CALL" ? `${roiPerDay.toFixed(2)}%` : "-"}
                                   </TableCell>
                                   <TableCell className={`whitespace-nowrap ${monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" ? (
+                                    {leg.type === "PUT" || leg.type === "CALL" ? (
                                       <>
                                         {monthlyROI.toFixed(2)}%
                                         {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
@@ -764,7 +764,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                     )}
                                   </TableCell>
                                   <TableCell className={`whitespace-nowrap ${roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" ? `${roi.toFixed(2)}%` : "-"}
+                                    {leg.type === "PUT" || leg.type === "CALL" ? `${roi.toFixed(2)}%` : "-"}
                                   </TableCell>
                                   <TableCell className="whitespace-nowrap">
                                     <Badge variant={

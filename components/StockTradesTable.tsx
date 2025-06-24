@@ -239,8 +239,8 @@ export function StockTradesTable() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Badge 
-                          variant={trade.realized_pnl >= 0 ? "default" : "destructive"}
-                          className="text-xs"
+                          variant={trade.realized_pnl >= 0 ? "outline" : "destructive"}
+                          className={`text-xs ${trade.realized_pnl >= 0 ? 'text-green-600 border-green-600' : ''}`}
                         >
                           {trade.realized_pnl >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl)}
                         </Badge>

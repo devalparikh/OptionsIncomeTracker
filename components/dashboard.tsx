@@ -50,6 +50,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   const [portfolioValue, setPortfolioValue] = useState<any>(null)
   const [stockQuotes, setStockQuotes] = useState<Map<string, any>>(new Map())
   const [stockPositions, setStockPositions] = useState<StockPosition[]>([])
+  const [closedStockPositions, setClosedStockPositions] = useState<any[]>([])
+  const [stockRealizedPnL, setStockRealizedPnL] = useState<number>(0)
 
   // Keyboard shortcuts
   useKeyboardShortcuts([
@@ -85,6 +87,21 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     }
   }
 
+  // Add function to fetch stock realized PnL
+  const fetchStockRealizedPnL = async () => {
+    try {
+      const response = await fetch('/api/stock-trades-pairs')
+      if (response.ok) {
+        const data = await response.json()
+        setStockRealizedPnL(data.summary.totalRealizedPnL || 0)
+      } else {
+        console.error("Error fetching stock realized PnL:", response.statusText)
+      }
+    } catch (error) {
+      console.error("Error fetching stock realized PnL:", error)
+    }
+  }
+
   // Add function to fetch stock quotes
   const fetchStockQuotes = async () => {
     const symbols = [...new Set([...stockPositions.map(pos => pos.symbol), ...legs.map(leg => leg.symbol)])]
@@ -100,6 +117,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   const refetch = async () => {
     await refetchLegs()
     await fetchStockPositions()
+    await fetchStockRealizedPnL()
     await fetchStockQuotes()
   }
 
@@ -112,6 +130,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   // Fetch stock positions and quotes on initial load
   useEffect(() => {
     fetchStockPositions()
+    fetchStockRealizedPnL()
     fetchStockQuotes()
   }, [])
 
@@ -199,7 +218,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       return sum + (position.quantity * currentPrice)
     }, 0)
 
-    const realizedPL = allClosedLegs.reduce((sum, leg) => {
+    // Calculate options realized PnL
+    const optionsRealizedPL = allClosedLegs.reduce((sum, leg) => {
       const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
       const closePL = leg.close_price
         ? (leg.side === "SELL" ? -1 : 1) * (leg.close_price - leg.open_price) * 100 * leg.contracts
@@ -207,10 +227,27 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       return sum + premium + closePL
     }, 0)
 
-    const unrealizedPL = openLegs.reduce((sum, leg) => {
+    // Calculate options unrealized PnL
+    const optionsUnrealizedPL = openLegs.reduce((sum, leg) => {
       const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
       return sum + premium
     }, 0)
+
+    // Calculate stock realized PnL (from closed stock positions)
+    const stockRealizedPL = stockRealizedPnL
+
+    // Calculate stock unrealized PnL
+    const stockUnrealizedPL = stockPositions.reduce((sum, position) => {
+      const quote = stockQuotes.get(position.symbol)
+      const currentPrice = quote?.price || position.current_price
+      const marketValue = position.quantity * currentPrice
+      const totalCost = position.quantity * position.cost_basis
+      return sum + (marketValue - totalCost)
+    }, 0)
+
+    // Combined PnL calculations
+    const realizedPL = optionsRealizedPL + stockRealizedPL
+    const unrealizedPL = optionsUnrealizedPL + stockUnrealizedPL
 
     // Calculate projected monthly income based on current open positions
     const projectedMonthlyIncome = openLegs.reduce((sum, leg) => {
@@ -252,13 +289,17 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       totalSharesAtRisk,
       totalSharesAtRiskValue,
       totalOpenSharesValue,
+      optionsRealizedPL,
+      optionsUnrealizedPL,
+      stockRealizedPL,
+      stockUnrealizedPL,
       realizedPL,
       unrealizedPL,
       netPL: realizedPL + unrealizedPL,
       projectedMonthlyIncome,
       historicalAverageMonthlyIncome,
     }
-  }, [legs, openLegs, allClosedLegs, stockPositions, stockQuotes])
+  }, [legs, openLegs, allClosedLegs, stockPositions, stockQuotes, stockRealizedPnL])
 
   // Add portfolio calculations in the useMemo section (after portfolioMetrics)
   const portfolioCalculations = useMemo(() => {
@@ -435,7 +476,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               <p className="text-sm text-muted-foreground">Total value of all positions and collateral</p>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="text-center">
                   <div className="text-3xl font-bold text-foreground">
                     ${(portfolioMetrics.totalOpenSharesValue + portfolioMetrics.totalCapitalAtRisk).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -453,6 +494,16 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                     ${portfolioMetrics.totalCapitalAtRisk.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <p className="text-sm text-muted-foreground">Total Capital Collateral</p>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-bold ${portfolioMetrics.realizedPL + portfolioMetrics.unrealizedPL >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    ${(portfolioMetrics.realizedPL + portfolioMetrics.unrealizedPL).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Total Gains</p>
+                  <div className="text-xs text-muted-foreground space-y-1 mt-1">
+                    <div>Options income: ${portfolioMetrics.optionsRealizedPL.toFixed(2)} + ${portfolioMetrics.optionsUnrealizedPL.toFixed(2)}</div>
+                    <div>Stock: ${portfolioMetrics.stockRealizedPL.toFixed(2)} + ${portfolioMetrics.stockUnrealizedPL.toFixed(2)}</div>
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -692,7 +743,7 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle className="text-foreground">Closed & Expired Positions</CardTitle>
-                  <p className="text-sm text-muted-foreground">Manually closed contracts and expired positions</p>
+                  <p className="text-sm text-muted-foreground">Manually closed and expired positions</p>
                 </CardHeader>
                 <CardContent>
                   {allClosedLegs.length === 0 ? (

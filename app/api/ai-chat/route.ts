@@ -16,6 +16,7 @@ interface ChatConfig {
   maxTokens: number
   budgetMode: boolean
   webSearchEnabled: boolean
+  compressionLevel: string
 }
 
 interface PortfolioData {
@@ -32,6 +33,152 @@ interface RequestBody {
   portfolioData: PortfolioData
   config: ChatConfig
   webSearchResults?: any[]
+}
+
+// Enhanced portfolio data compression function
+function compressPortfolioData(portfolioData: PortfolioData, level: string): Record<string, any> {
+  const { openLegs, closedLegs, stockPositions, portfolioMetrics, stockQuotes } = portfolioData;
+  
+  // Determine limits based on compression level
+  const limits = {
+    basic: { openPositions: 10, closedPositions: 10, stockPositions: 5 },
+    aggressive: { openPositions: 5, closedPositions: 5, stockPositions: 3 },
+    minimal: { openPositions: 3, closedPositions: 3, stockPositions: 2 }
+  };
+  
+  const currentLimits = limits[level as keyof typeof limits] || limits.basic;
+  
+  // Compress stock quotes to essential data only
+  const compressedQuotes: Record<string, any> = {};
+  if (stockQuotes instanceof Map) {
+    for (const [symbol, quote] of stockQuotes) {
+      compressedQuotes[symbol] = {
+        price: (quote as any).price,
+        change: (quote as any).change,
+        changePercent: (quote as any).changePercent
+      };
+    }
+  } else if (typeof stockQuotes === 'object') {
+    for (const [symbol, quote] of Object.entries(stockQuotes)) {
+      compressedQuotes[symbol] = {
+        price: (quote as any).price,
+        change: (quote as any).change,
+        changePercent: (quote as any).changePercent
+      };
+    }
+  }
+
+  // Compress open legs - keep only essential fields and top positions
+  const compressedOpenLegs = (openLegs || [])
+    .map(leg => ({
+      symbol: leg.symbol,
+      type: leg.type,
+      side: leg.side,
+      strike: leg.strike,
+      expiry: leg.expiry,
+      contracts: leg.contracts,
+      open_price: leg.open_price,
+      unrealized_pnl: leg.unrealized_pnl,
+      days_to_expiry: Math.max(0, Math.ceil((new Date(leg.expiry).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))
+    }))
+    .sort((a, b) => Math.abs(b.unrealized_pnl || 0) - Math.abs(a.unrealized_pnl || 0))
+    .slice(0, currentLimits.openPositions);
+
+  // Compress closed legs - aggregate by symbol and keep top performers
+  const closedBySymbol = new Map<string, any>();
+  (closedLegs || []).forEach(leg => {
+    const key = leg.symbol;
+    if (!closedBySymbol.has(key)) {
+      closedBySymbol.set(key, {
+        symbol: leg.symbol,
+        total_realized_pnl: 0,
+        total_premium_collected: 0,
+        trade_count: 0,
+        avg_days_held: 0,
+        total_days: 0
+      });
+    }
+    const entry = closedBySymbol.get(key);
+    entry.total_realized_pnl += leg.realized_pnl || 0;
+    entry.total_premium_collected += (leg.open_price * leg.contracts * 100) || 0;
+    entry.trade_count += 1;
+    
+    const daysHeld = leg.closeDate ? 
+      Math.ceil((new Date(leg.closeDate).getTime() - new Date(leg.openDate).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+    entry.total_days += daysHeld;
+  });
+
+  // Calculate averages and sort by performance
+  const compressedClosedLegs = Array.from(closedBySymbol.values())
+    .map(entry => ({
+      ...entry,
+      avg_days_held: entry.trade_count > 0 ? Math.round(entry.total_days / entry.trade_count) : 0
+    }))
+    .sort((a, b) => b.total_realized_pnl - a.total_realized_pnl)
+    .slice(0, currentLimits.closedPositions);
+
+  // Compress stock positions - keep essential data only
+  const compressedStockPositions = (stockPositions || [])
+    .map(stock => ({
+      symbol: stock.symbol,
+      quantity: stock.quantity,
+      cost_basis: stock.cost_basis,
+      current_price: stock.current_price,
+      unrealized_pl: stock.unrealized_pl,
+      unrealized_pl_percent: stock.unrealized_pl_percent
+    }))
+    .sort((a, b) => Math.abs(b.unrealized_pl || 0) - Math.abs(a.unrealized_pl || 0))
+    .slice(0, currentLimits.stockPositions);
+
+  // Compress portfolio metrics - keep only essential metrics
+  const compressedMetrics = {
+    netPL: portfolioMetrics?.netPL,
+    totalPremiumCollected: portfolioMetrics?.totalPremiumCollected,
+    totalCapitalAtRisk: portfolioMetrics?.totalCapitalAtRisk,
+    totalSharesAtRisk: portfolioMetrics?.totalSharesAtRisk,
+    totalSharesAtRiskValue: portfolioMetrics?.totalSharesAtRiskValue,
+    projectedMonthlyIncome: portfolioMetrics?.projectedMonthlyIncome,
+    historicalAverageMonthlyIncome: portfolioMetrics?.historicalAverageMonthlyIncome,
+    totalOpenPositions: openLegs?.length || 0,
+    totalClosedPositions: closedLegs?.length || 0,
+    totalStockPositions: stockPositions?.length || 0
+  };
+
+  // Create summary statistics
+  const summary = {
+    totalOpenValue: compressedOpenLegs.reduce((sum, leg) => sum + (leg.open_price * leg.contracts * 100), 0),
+    totalUnrealizedPL: compressedOpenLegs.reduce((sum, leg) => sum + (leg.unrealized_pnl || 0), 0),
+    totalRealizedPL: compressedClosedLegs.reduce((sum, leg) => sum + leg.total_realized_pnl, 0),
+    totalStockValue: compressedStockPositions.reduce((sum, stock) => sum + (stock.quantity * stock.current_price), 0),
+    totalStockPL: compressedStockPositions.reduce((sum, stock) => sum + (stock.unrealized_pl || 0), 0),
+    avgDaysToExpiry: compressedOpenLegs.length > 0 ? 
+      Math.round(compressedOpenLegs.reduce((sum, leg) => sum + leg.days_to_expiry, 0) / compressedOpenLegs.length) : 0
+  };
+
+  // For minimal compression, only include the most essential data
+  if (level === 'minimal') {
+    return {
+      summary: {
+        netPL: portfolioMetrics?.netPL,
+        totalPremiumCollected: portfolioMetrics?.totalPremiumCollected,
+        totalCapitalAtRisk: portfolioMetrics?.totalCapitalAtRisk,
+        totalOpenPositions: openLegs?.length || 0,
+        totalClosedPositions: closedLegs?.length || 0
+      },
+      topOpenPositions: compressedOpenLegs.slice(0, 2),
+      topClosedPositions: compressedClosedLegs.slice(0, 2),
+      topStockPositions: compressedStockPositions.slice(0, 1)
+    };
+  }
+
+  return {
+    summary,
+    metrics: compressedMetrics,
+    topOpenPositions: compressedOpenLegs,
+    topClosedPositions: compressedClosedLegs,
+    topStockPositions: compressedStockPositions,
+    quotes: compressedQuotes
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -58,30 +205,13 @@ export async function POST(request: NextRequest) {
     // Budget mode: compress context
     let portfolioContext: Record<string, any> = {};
     let systemPrompt = config.systemPrompt;
-    if (config.budgetMode) {
-      // Top 3 open by value
-      const topOpen = (portfolioData.openLegs || [])
-        .slice()
-        .sort((a: any, b: any) => (b.open_price * b.contracts) - (a.open_price * a.contracts))
-        .slice(0, 3);
-      // Top 3 closed by realized P/L
-      const topClosed = (portfolioData.closedLegs || [])
-        .slice()
-        .sort((a: any, b: any) => (b.realized_pnl || 0) - (a.realized_pnl || 0))
-        .slice(0, 3);
-      portfolioContext = {
-        summary: {
-          totalOpen: portfolioData.openLegs?.length || 0,
-          totalClosed: portfolioData.closedLegs?.length || 0,
-          totalStocks: portfolioData.stockPositions?.length || 0,
-          metrics: portfolioData.portfolioMetrics || {},
-        },
-        topOpenPositions: topOpen,
-        topClosedPositions: topClosed,
-      };
+    if (config.compressionLevel && config.compressionLevel !== 'none') {
+      // Enhanced compression strategy based on level
+      const compressedData = compressPortfolioData(portfolioData, config.compressionLevel);
+      portfolioContext = compressedData;
       systemPrompt =
         config.systemPrompt +
-        '\n\n[Budget Mode: Only summary and top positions are included to optimize token usage.]'
+        `\n\n[Compression Level: ${config.compressionLevel} - Data has been compressed to optimize token usage while preserving key metrics and top positions.]`
     } else {
       portfolioContext = {
         openLegs: portfolioData.openLegs || [],

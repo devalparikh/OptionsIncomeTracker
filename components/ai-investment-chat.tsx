@@ -50,9 +50,10 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [config, setConfig] = useState<AIChatConfig>(DEFAULT_CONFIG)
   const [showConfig, setShowConfig] = useState(false)
-  const [configError, setConfigError] = useState("")
+  const [configError, setConfigError] = useState<string | null>(null)
   const [selectedPromptVariant, setSelectedPromptVariant] = useState("custom")
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [totalTokensUsed, setTotalTokensUsed] = useState(0)
 
   // Load config from localStorage on mount
   useEffect(() => {
@@ -97,7 +98,7 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
     // Only save if we have a config with at least some non-default values
     if (config.apiKey || config.systemPrompt !== DEFAULT_CONFIG.systemPrompt || 
         config.model !== DEFAULT_CONFIG.model || config.temperature !== DEFAULT_CONFIG.temperature ||
-        config.maxTokens !== DEFAULT_CONFIG.maxTokens || config.budgetMode !== DEFAULT_CONFIG.budgetMode ||
+        config.maxTokens !== DEFAULT_CONFIG.maxTokens || config.compressionLevel !== DEFAULT_CONFIG.compressionLevel ||
         config.webSearchEnabled !== DEFAULT_CONFIG.webSearchEnabled) {
       console.log("Saving config to localStorage:", { ...config, apiKey: config.apiKey ? config.apiKey.substring(0, 10) + "..." : "" })
       localStorage.setItem("ai-chat-config", JSON.stringify(config))
@@ -197,6 +198,27 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
     }
   }
 
+  const estimateTokenUsage = (portfolioData: PortfolioData, compressionLevel: string) => {
+    // Rough estimation based on data size and compression level
+    const baseTokens = 1000; // Base system prompt and structure
+    
+    if (compressionLevel === 'none') {
+      const openLegsTokens = (portfolioData.openLegs?.length || 0) * 200;
+      const closedLegsTokens = (portfolioData.closedLegs?.length || 0) * 150;
+      const stockTokens = (portfolioData.stockPositions?.length || 0) * 100;
+      const quotesTokens = Object.keys(portfolioData.stockQuotes || {}).length * 50;
+      return baseTokens + openLegsTokens + closedLegsTokens + stockTokens + quotesTokens;
+    } else if (compressionLevel === 'basic') {
+      return baseTokens + 2000; // ~10 positions * 200 tokens
+    } else if (compressionLevel === 'aggressive') {
+      return baseTokens + 1000; // ~5 positions * 200 tokens
+    } else if (compressionLevel === 'minimal') {
+      return baseTokens + 500; // ~2-3 positions * 200 tokens
+    }
+    
+    return baseTokens + 1000; // Default estimate
+  }
+
   return (
     <Card className="border-border/50 bg-card/50 backdrop-blur-sm flex-1 min-h-0 flex flex-col w-full">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
@@ -226,7 +248,14 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
       <CardContent className="flex-1 min-h-0 flex flex-col space-y-4 overflow-hidden p-4 md:p-6">
         {/* Portfolio Summary */}
         <div className="bg-muted/30 rounded-lg p-3 mb-2">
-          <div className="text-sm font-medium text-foreground mb-2">Portfolio Summary</div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-medium text-foreground">Portfolio Summary</div>
+            {config.compressionLevel && config.compressionLevel !== 'none' && (
+              <div className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                Compression: {config.compressionLevel}
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
             <div>
               <span className="text-muted-foreground">Open:</span> {portfolioData.openLegs.length}
@@ -510,16 +539,23 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
               />
             </div>
             <div>
-              <Label htmlFor="budgetMode">Budget Mode</Label>
-              <div className="flex items-center space-x-2">
-                <input
-                  id="budgetMode"
-                  type="checkbox"
-                  checked={!!config.budgetMode}
-                  onChange={e => setConfig(prev => ({ ...prev, budgetMode: e.target.checked }))}
-                  className="form-checkbox h-4 w-4 text-primary border-gray-300 rounded"
-                />
-                <span className="text-xs text-muted-foreground">Optimize for lower token usage</span>
+              <Label htmlFor="compressionLevel">Data Compression Level</Label>
+              <select
+                id="compressionLevel"
+                value={config.compressionLevel || 'none'}
+                onChange={(e) => setConfig(prev => ({ ...prev, compressionLevel: e.target.value as any }))}
+                className="w-full p-2 border rounded-md"
+              >
+                <option value="none">None - Full data (highest token usage)</option>
+                <option value="basic">Basic - Top 10 positions (moderate compression)</option>
+                <option value="aggressive">Aggressive - Top 5 positions (high compression)</option>
+                <option value="minimal">Minimal - Top 2-3 positions (maximum compression)</option>
+              </select>
+              <div className="text-xs text-muted-foreground mt-1">
+                Higher compression reduces API costs but may limit analysis detail
+              </div>
+              <div className="text-xs text-blue-600 mt-1">
+                Estimated tokens: {estimateTokenUsage(portfolioData, config.compressionLevel || 'none')}
               </div>
             </div>
             <div className="flex justify-end space-x-2">

@@ -5,6 +5,7 @@ export interface AIChatConfig {
   temperature: number
   maxTokens: number
   budgetMode?: boolean
+  compressionLevel?: 'none' | 'basic' | 'aggressive' | 'minimal'
   webSearchEnabled?: boolean
 }
 
@@ -42,6 +43,7 @@ export const DEFAULT_CONFIG: AIChatConfig = {
   temperature: 0.7,
   maxTokens: 1000,
   budgetMode: false,
+  compressionLevel: 'none',
   webSearchEnabled: false
 }
 

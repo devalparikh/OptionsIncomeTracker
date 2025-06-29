@@ -12,7 +12,7 @@ import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
 import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
-import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare, Headphones } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
 import { PortfolioValueWidget } from "./portfolio-value-widget"
@@ -26,6 +26,7 @@ import { getStockQuotes } from "@/app/actions/market-data"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StockTradesTable } from "./StockTradesTable"
 import { AIInvestmentChat } from "./ai-investment-chat"
+import { PortfolioPodcast } from "./portfolio-podcast"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -73,6 +74,12 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       ctrlKey: true,
       callback: () => setActiveTab("chat"),
       description: "Go to AI chat",
+    },
+    {
+      key: "p",
+      ctrlKey: true,
+      callback: () => setActiveTab("podcast"),
+      description: "Go to portfolio podcast",
     },
   ])
 
@@ -670,6 +677,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   <span className="hidden sm:inline">Chat</span>
                   <span className="sm:hidden">Chat</span>
                 </TabsTrigger>
+                <TabsTrigger 
+                  value="podcast" 
+                  className="data-[state=active]:bg-background/80 whitespace-nowrap flex-shrink-0"
+                >
+                  <Headphones className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">Podcast</span>
+                  <span className="sm:hidden">Podcast</span>
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -874,6 +889,20 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
 
             <TabsContent value="chat" className="space-y-4 flex flex-col h-full min-h-0">
               <AIInvestmentChat 
+                portfolioData={{
+                  openLegs,
+                  closedLegs: allClosedLegs,
+                  stockPositions,
+                  portfolioMetrics,
+                  coveredCallPositions: coveredCallSharePositions,
+                  stockQuotes
+                }}
+                loading={loading}
+              />
+            </TabsContent>
+
+            <TabsContent value="podcast" className="space-y-4 flex flex-col h-full min-h-0">
+              <PortfolioPodcast 
                 portfolioData={{
                   openLegs,
                   closedLegs: allClosedLegs,

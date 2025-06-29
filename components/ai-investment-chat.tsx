@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, Bot, User, Settings, AlertCircle, Globe, Search } from "lucide-react"
+import { Loader2, Send, Bot, User, Settings, AlertCircle, Globe, Search, Copy, Check } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch } from "@/lib/ai-chat-config"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 interface Message {
   id: string
@@ -42,7 +44,7 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
   const [showConfig, setShowConfig] = useState(false)
   const [configError, setConfigError] = useState("")
   const [selectedPromptVariant, setSelectedPromptVariant] = useState("custom")
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 
   // Load config from localStorage on mount
   useEffect(() => {
@@ -143,6 +145,16 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
     }))
   }
 
+  const copyMessage = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessageId(messageId)
+      setTimeout(() => setCopiedMessageId(null), 2000)
+    } catch (error) {
+      console.error("Failed to copy message:", error)
+    }
+  }
+
   return (
     <Card className="border-border/50 bg-card/50 backdrop-blur-sm flex-1 min-h-0 flex flex-col w-full">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
@@ -206,40 +218,70 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                    className={`flex ${message.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in-0 slide-in-from-bottom-2 duration-300`}
                   >
                     <div
-                      className={`max-w-[80%] rounded-lg p-3 ${
+                      className={`max-w-[85%] rounded-lg p-3 relative group ${
                         message.role === "user"
                           ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
+                          : "bg-muted text-foreground border border-border/50"
                       }`}
                     >
-                      <div className="flex items-center space-x-2 mb-1">
-                        {message.role === "user" ? (
-                          <User className="h-3 w-3" />
-                        ) : (
-                          <Bot className="h-3 w-3" />
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          {message.role === "user" ? (
+                            <User className="h-3 w-3" />
+                          ) : (
+                            <Bot className="h-3 w-3" />
+                          )}
+                          <span className="text-xs opacity-70">
+                            {message.timestamp.toLocaleTimeString()}
+                          </span>
+                        </div>
+                        {message.role === "assistant" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => copyMessage(message.id, message.content)}
+                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            {copiedMessageId === message.id ? (
+                              <Check className="h-3 w-3 text-green-600" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </Button>
                         )}
-                        <span className="text-xs opacity-70">
-                          {message.timestamp.toLocaleTimeString()}
-                        </span>
                       </div>
-                      <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                      <div className={`text-sm ${message.role === "user" ? "" : "prose-custom"}`}>
+                        {message.role === "user" ? (
+                          <div className="whitespace-pre-wrap">{message.content}</div>
+                        ) : (
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
                 {isLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-muted rounded-lg p-3">
+                  <div className="flex justify-start animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+                    <div className="bg-muted rounded-lg p-3 border border-border/50">
                       <div className="flex items-center space-x-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Bot className="h-4 w-4 text-primary" />
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-primary rounded-full typing-dot"></div>
+                          <div className="w-2 h-2 bg-primary rounded-full typing-dot"></div>
+                          <div className="w-2 h-2 bg-primary rounded-full typing-dot"></div>
+                        </div>
                         <span className="text-sm text-muted-foreground">Analyzing...</span>
                       </div>
                     </div>
                   </div>
                 )}
-                <div ref={messagesEndRef} />
               </div>
             )}
           </ScrollArea>

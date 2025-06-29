@@ -5,6 +5,7 @@ export interface AIChatConfig {
   temperature: number
   maxTokens: number
   budgetMode?: boolean
+  webSearchEnabled?: boolean
 }
 
 export const DEFAULT_SYSTEM_PROMPT = `You are a professional investment analyst specializing in options trading and the wheel strategy. You have access to the user's portfolio data including:
@@ -40,14 +41,28 @@ export const DEFAULT_CONFIG: AIChatConfig = {
   model: "gpt-4",
   temperature: 0.7,
   maxTokens: 1000,
-  budgetMode: false
+  budgetMode: false,
+  webSearchEnabled: false
 }
 
 export const AVAILABLE_MODELS = [
   { value: "gpt-4", label: "GPT-4" },
   { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
-  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" }
+  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+  { value: "gpt-4o", label: "GPT-4o (Web Search)" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini (Web Search)" },
+  { value: "gpt-4.1", label: "GPT-4.1 (Web Search)" },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini (Web Search)" },
 ]
+
+export function modelSupportsWebSearch(model: string) {
+  return [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini"
+  ].includes(model)
+}
 
 export const TEMPERATURE_PRESETS = [
   { value: 0.1, label: "Very Focused" },

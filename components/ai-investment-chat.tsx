@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, Bot, User, Settings, AlertCircle } from "lucide-react"
+import { Loader2, Send, Bot, User, Settings, AlertCircle, Globe, Search } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS } from "@/lib/ai-chat-config"
+import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch } from "@/lib/ai-chat-config"
 
 interface Message {
   id: string
@@ -246,7 +246,23 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
         </div>
 
         {/* Input */}
-        <div className="flex space-x-2 pt-2">
+        <div className="flex space-x-2 pt-2 items-center">
+          <Button
+            type="button"
+            variant={config.webSearchEnabled ? "default" : "outline"}
+            size="icon"
+            onClick={() => {
+              if (!config.webSearchEnabled) {
+                setConfig(prev => ({ ...prev, webSearchEnabled: true, model: "gpt-4o" }))
+              } else {
+                setConfig(prev => ({ ...prev, webSearchEnabled: false }))
+              }
+            }}
+            title="Enable Web Search (uses GPT-4o)"
+            aria-label="Enable Web Search (uses GPT-4o)"
+          >
+            <Globe className={config.webSearchEnabled ? "text-blue-600" : "text-muted-foreground"} />
+          </Button>
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

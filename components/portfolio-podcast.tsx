@@ -100,6 +100,15 @@ const AVAILABLE_VOICES = [
   { value: "shimmer", label: "Shimmer" }
 ]
 
+const PLAYBACK_SPEEDS = [
+  { value: 0.5, label: "0.5x" },
+  { value: 0.75, label: "0.75x" },
+  { value: 1.0, label: "1x" },
+  { value: 1.25, label: "1.25x" },
+  { value: 1.5, label: "1.5x" },
+  { value: 2.0, label: "2x" }
+]
+
 export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastProps) {
   const [episodes, setEpisodes] = useState<PodcastEpisode[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
@@ -121,6 +130,7 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
   const [expandedEpisodes, setExpandedEpisodes] = useState<Set<string>>(new Set())
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
 
   // Load config from localStorage on mount
   useEffect(() => {
@@ -140,6 +150,17 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
     const savedVoice = localStorage.getItem("portfolio-podcast-voice")
     if (savedVoice) {
       setVoice(savedVoice)
+    }
+    
+    // Load saved playback speed
+    const savedPlaybackSpeed = localStorage.getItem("portfolio-podcast-speed")
+    if (savedPlaybackSpeed) {
+      try {
+        const parsedSpeed = parseFloat(savedPlaybackSpeed)
+        setPlaybackSpeed(parsedSpeed)
+      } catch (error) {
+        console.error("Error loading playback speed:", error)
+      }
     }
     
     // Load saved token usage
@@ -180,6 +201,11 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
   useEffect(() => {
     localStorage.setItem("portfolio-podcast-voice", voice)
   }, [voice])
+
+  // Save playback speed to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("portfolio-podcast-speed", playbackSpeed.toString())
+  }, [playbackSpeed])
 
   const generatePodcastContent = async () => {
     if (!config.apiKey) {
@@ -305,6 +331,9 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
 
     const audio = new Audio(audioUrl)
     
+    // Set playback speed
+    audio.playbackRate = playbackSpeed
+    
     // Add event listeners for time tracking
     audio.addEventListener('loadedmetadata', () => {
       setDuration(audio.duration)
@@ -343,6 +372,13 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
     if (currentAudio) {
       currentAudio.currentTime = newTime
       setCurrentTime(newTime)
+    }
+  }
+
+  const handleSpeedChange = (newSpeed: number) => {
+    setPlaybackSpeed(newSpeed)
+    if (currentAudio) {
+      currentAudio.playbackRate = newSpeed
     }
   }
 
@@ -390,8 +426,10 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
       webSearchEnabled: true
     })
     setVoice("alloy")
+    setPlaybackSpeed(1.0)
     localStorage.removeItem("portfolio-podcast-config")
     localStorage.removeItem("portfolio-podcast-voice")
+    localStorage.removeItem("portfolio-podcast-speed")
   }
 
   return (
@@ -624,6 +662,31 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
                           </div>
                           <div className="text-xs text-muted-foreground min-w-[40px]">
                             {formatTime(duration)}
+                          </div>
+                        </div>
+                        
+                        {/* Playback Speed Controls */}
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs text-muted-foreground">Speed:</span>
+                            <select
+                              value={playbackSpeed}
+                              onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
+                              className="text-xs bg-muted border border-border rounded px-2 py-1"
+                            >
+                              {PLAYBACK_SPEEDS.map(speed => (
+                                <option key={speed.value} value={speed.value}>
+                                  {speed.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {playbackSpeed !== 1.0 && (
+                              <span className="bg-primary/10 text-primary px-2 py-1 rounded">
+                                {playbackSpeed}x
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

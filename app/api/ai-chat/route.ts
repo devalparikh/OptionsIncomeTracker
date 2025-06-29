@@ -160,20 +160,59 @@ export async function POST(request: NextRequest) {
 
     // Parse the response
     let content
+    let sources: any[] = []
+    
+    console.log("Full OpenAI response structure:", JSON.stringify(openaiResponse, null, 2))
+    
     if (config.webSearchEnabled && WEB_SEARCH_MODELS.includes(config.model)) {
-      content = openaiResponse.output_text
+      // For web search models, extract content and sources from the response structure
+      if (openaiResponse.output && Array.isArray(openaiResponse.output)) {
+        // Find the message content in the output array
+        const messageOutput = openaiResponse.output.find((item: any) => item.type === 'message')
+        if (messageOutput && messageOutput.content && Array.isArray(messageOutput.content)) {
+          const outputText = messageOutput.content.find((item: any) => item.type === 'output_text')
+          if (outputText) {
+            content = outputText.text
+            
+            // Extract sources from annotations
+            if (outputText.annotations && Array.isArray(outputText.annotations)) {
+              const urlCitations = outputText.annotations.filter((annotation: any) => annotation.type === 'url_citation')
+              sources = urlCitations.map((citation: any) => ({
+                title: citation.title || 'Untitled',
+                url: citation.url || '',
+                snippet: '', // OpenAI doesn't provide snippets in annotations
+                start_index: citation.start_index,
+                end_index: citation.end_index
+              }))
+            }
+          }
+        }
+      }
+      
+      // Fallback to output_text if the above structure doesn't work
+      if (!content && openaiResponse.output_text) {
+        content = openaiResponse.output_text
+      }
     } else if (openaiResponse.choices) {
       content = openaiResponse.choices[0]?.message?.content
     } else if (openaiResponse.choices && openaiResponse.choices[0]?.output_text) {
       content = openaiResponse.choices[0].output_text
     }
+    
     if (!content) {
       return NextResponse.json(
         { error: "No response content from OpenAI" },
         { status: 500 }
       )
     }
-    return NextResponse.json({ content })
+    
+    console.log("Extracted content length:", content?.length)
+    console.log("Extracted sources:", sources)
+    
+    return NextResponse.json({ 
+      content,
+      sources: sources.length > 0 ? sources : undefined
+    })
 
   } catch (error) {
     console.error("AI chat error:", error)

@@ -20,6 +20,14 @@ interface Message {
   role: "user" | "assistant"
   content: string
   timestamp: Date
+  sources?: Array<{
+    title: string
+    url: string
+    snippet: string
+    published_date?: string | null
+    start_index?: number
+    end_index?: number
+  }>
 }
 
 interface PortfolioData {
@@ -135,12 +143,14 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
       }
 
       const data = await response.json()
+      console.log("Data:", data)
       
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: data.content,
-        timestamp: new Date()
+        timestamp: new Date(),
+        sources: data.sources
       }
 
       setMessages(prev => [...prev, assistantMessage])
@@ -294,6 +304,44 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
                           >
                             {message.content}
                           </ReactMarkdown>
+                        )}
+                        
+                        {/* Sources Section */}
+                        {message.sources && message.sources.length > 0 && (
+                          <div className="mt-4 pt-3 border-t border-border/30">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Globe className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs font-medium text-muted-foreground">Sources</span>
+                            </div>
+                            <div className="space-y-2">
+                              {message.sources.map((source, index) => (
+                                <div key={index} className="text-xs">
+                                  <a
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary hover:underline font-medium block mb-1"
+                                  >
+                                    {source.title}
+                                  </a>
+                                  {source.snippet ? (
+                                    <p className="text-muted-foreground leading-relaxed">
+                                      {source.snippet}
+                                    </p>
+                                  ) : (
+                                    <p className="text-muted-foreground leading-relaxed">
+                                      Cited in response (characters {source.start_index}-{source.end_index})
+                                    </p>
+                                  )}
+                                  {source.published_date && (
+                                    <span className="text-muted-foreground text-xs">
+                                      {new Date(source.published_date).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>

@@ -49,19 +49,51 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
   // Load config from localStorage on mount
   useEffect(() => {
     const savedConfig = localStorage.getItem("ai-chat-config")
+    console.log("Loading saved config:", savedConfig)
     if (savedConfig) {
       try {
         const parsed = JSON.parse(savedConfig)
-        setConfig({ ...DEFAULT_CONFIG, ...parsed })
+        console.log("Parsed config:", parsed)
+        // Only merge non-empty values to preserve existing API key
+        const mergedConfig = { ...DEFAULT_CONFIG }
+        Object.keys(parsed).forEach(key => {
+          if (key === 'apiKey') {
+            // Only set API key if it exists and is not empty
+            if (parsed.apiKey && parsed.apiKey.trim() !== '') {
+              mergedConfig.apiKey = parsed.apiKey
+              console.log("Loaded API key:", parsed.apiKey.substring(0, 10) + "...")
+            }
+          } else if (parsed[key] !== undefined && parsed[key] !== null) {
+            ;(mergedConfig as any)[key] = parsed[key]
+          }
+        })
+        console.log("Final merged config:", mergedConfig)
+        setConfig(mergedConfig)
+        
+        // Set the selected prompt variant based on the loaded system prompt
+        const systemPrompt = mergedConfig.systemPrompt
+        const variant = Object.entries(SYSTEM_PROMPT_VARIANTS).find(([_, prompt]) => prompt === systemPrompt)
+        if (variant) {
+          setSelectedPromptVariant(variant[0])
+        }
       } catch (error) {
         console.error("Error loading chat config:", error)
       }
+    } else {
+      console.log("No saved config found, using defaults")
     }
   }, [])
 
   // Save config to localStorage when it changes
   useEffect(() => {
-    localStorage.setItem("ai-chat-config", JSON.stringify(config))
+    // Only save if we have a config with at least some non-default values
+    if (config.apiKey || config.systemPrompt !== DEFAULT_CONFIG.systemPrompt || 
+        config.model !== DEFAULT_CONFIG.model || config.temperature !== DEFAULT_CONFIG.temperature ||
+        config.maxTokens !== DEFAULT_CONFIG.maxTokens || config.budgetMode !== DEFAULT_CONFIG.budgetMode ||
+        config.webSearchEnabled !== DEFAULT_CONFIG.webSearchEnabled) {
+      console.log("Saving config to localStorage:", { ...config, apiKey: config.apiKey ? config.apiKey.substring(0, 10) + "..." : "" })
+      localStorage.setItem("ai-chat-config", JSON.stringify(config))
+    }
   }, [config])
 
   const sendMessage = async () => {

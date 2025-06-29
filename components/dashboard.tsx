@@ -12,7 +12,7 @@ import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
 import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
-import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
 import { PortfolioValueWidget } from "./portfolio-value-widget"
@@ -25,6 +25,7 @@ import { getAlphaVantageClient } from "@/lib/alpha-vantage"
 import { getStockQuotes } from "@/app/actions/market-data"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StockTradesTable } from "./StockTradesTable"
+import { AIInvestmentChat } from "./ai-investment-chat"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -66,6 +67,12 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       ctrlKey: true,
       callback: () => setActiveTab("market"),
       description: "Go to market analysis",
+    },
+    {
+      key: "c",
+      ctrlKey: true,
+      callback: () => setActiveTab("chat"),
+      description: "Go to AI chat",
     },
   ])
 
@@ -655,6 +662,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   <span className="hidden sm:inline">Market Analysis</span>
                   <span className="sm:hidden">Market</span>
                 </TabsTrigger>
+                <TabsTrigger 
+                  value="chat" 
+                  className="data-[state=active]:bg-background/80 whitespace-nowrap flex-shrink-0"
+                >
+                  <MessageSquare className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">Chat</span>
+                  <span className="sm:hidden">Chat</span>
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -855,6 +870,20 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   </div>
                 )}
               </div>
+            </TabsContent>
+
+            <TabsContent value="chat" className="space-y-4 flex flex-col h-full min-h-0">
+              <AIInvestmentChat 
+                portfolioData={{
+                  openLegs,
+                  closedLegs: allClosedLegs,
+                  stockPositions,
+                  portfolioMetrics,
+                  coveredCallPositions: coveredCallSharePositions,
+                  stockQuotes
+                }}
+                loading={loading}
+              />
             </TabsContent>
           </Tabs>
           <h1 className="text-3xl font-bold">Stocks</h1>

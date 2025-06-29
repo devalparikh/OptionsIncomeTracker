@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch, estimateCost } from "@/lib/ai-chat-config"
+import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch, estimateCost, OPENAI_PRICING } from "@/lib/ai-chat-config"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -279,7 +279,7 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
                   Compression: {config.compressionLevel}
                 </div>
                 <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                  ~${estimateCost(estimateTokenUsage(portfolioData, 'none') - estimateTokenUsage(portfolioData, config.compressionLevel), config.model)} saved
+                  ~${estimateCost(estimateTokenUsage(portfolioData, 'none') - estimateTokenUsage(portfolioData, config.compressionLevel), config.model, config.webSearchEnabled)} saved
                 </div>
               </div>
             )}
@@ -453,7 +453,7 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
             />
             {config.compressionLevel && config.compressionLevel !== 'none' && (
               <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-muted-foreground">
-                ~{estimateTokenUsage(portfolioData, config.compressionLevel)} tokens • ~${estimateCost(estimateTokenUsage(portfolioData, config.compressionLevel), config.model)}
+                ~{estimateTokenUsage(portfolioData, config.compressionLevel)} tokens • ~${estimateCost(estimateTokenUsage(portfolioData, config.compressionLevel), config.model, config.webSearchEnabled)}
               </div>
             )}
           </div>
@@ -473,6 +473,28 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
               {configError}
             </AlertDescription>
           </Alert>
+        )}
+
+        {/* Token Usage Summary */}
+        {totalTokensUsed > 0 && (
+          <div className="bg-muted/30 rounded-lg p-3">
+            <Label className="text-sm font-medium">Current Session Usage</Label>
+            <div className="text-xs text-muted-foreground mt-1 space-y-1">
+              <div>Total tokens used: {totalTokensUsed.toLocaleString()}</div>
+              <div>Actual cost: ${totalCost.toFixed(4)}</div>
+              {config.webSearchEnabled && (
+                <div className="text-xs text-blue-600">
+                  Web search enabled: +${estimateCost(0, config.model, true)} per call
+                </div>
+              )}
+              {/* <div className="text-xs text-orange-600">
+                {config.webSearchEnabled 
+                  ? `Web search: $${OPENAI_PRICING[config.model as keyof typeof OPENAI_PRICING]?.webSearchCost || 25}/1K calls`
+                  : `GPT-4o: ~$0.0025/1K input tokens, GPT-4o-mini: ~$0.00015/1K input tokens`
+                }
+              </div> */}
+            </div>
+          </div>
         )}
       </CardContent>
 
@@ -594,20 +616,6 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
               </div>
             </div>
             
-            {/* Token Usage Summary */}
-            {totalTokensUsed > 0 && (
-              <div className="bg-muted/30 rounded-lg p-3">
-                <Label className="text-sm font-medium">Current Session Usage</Label>
-                <div className="text-xs text-muted-foreground mt-1 space-y-1">
-                  <div>Total tokens used: {totalTokensUsed.toLocaleString()}</div>
-                  <div>Actual cost: ${totalCost.toFixed(4)}</div>
-                  <div className="text-xs text-orange-600">
-                    Cost varies by model. GPT-4o is ~$0.0025/1K input tokens, GPT-4o-mini is ~$0.00015/1K input tokens
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="flex justify-end space-x-2">
               <Button
                 variant="outline"

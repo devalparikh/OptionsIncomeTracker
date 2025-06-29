@@ -347,7 +347,7 @@ export async function POST(request: NextRequest) {
     const cachedTokens = openaiResponse.usage?.input_tokens_details?.cached_tokens || 0
     
     // Calculate cost using the new pricing function
-    const estimatedCost = calculateOpenAICost(config.model, inputTokens, outputTokens, cachedTokens)
+    const estimatedCost = calculateOpenAICost(config.model, inputTokens, outputTokens, cachedTokens, config.webSearchEnabled)
     
     return NextResponse.json({ 
       content,

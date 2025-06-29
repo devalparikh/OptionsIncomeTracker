@@ -90,47 +90,47 @@ export const SYSTEM_PROMPT_VARIANTS = {
 // OpenAI pricing per 1M tokens (as of 2024-2025)
 export const OPENAI_PRICING = {
   // GPT-4.1 models
-  'gpt-4.1': { input: 2.00, cached: 0.50, output: 8.00 },
-  'gpt-4.1-mini': { input: 0.40, cached: 0.10, output: 1.60 },
-  'gpt-4.1-nano': { input: 0.10, cached: 0.025, output: 0.40 },
+  'gpt-4.1': { input: 2.00, cached: 0.50, output: 8.00, webSearchCost: 25.00 },
+  'gpt-4.1-mini': { input: 0.40, cached: 0.10, output: 1.60, webSearchCost: 25.00 },
+  'gpt-4.1-nano': { input: 0.10, cached: 0.025, output: 0.40, webSearchCost: 25.00 },
   
   // GPT-4.5 models
-  'gpt-4.5-preview': { input: 75.00, cached: 37.50, output: 150.00 },
+  'gpt-4.5-preview': { input: 75.00, cached: 37.50, output: 150.00, webSearchCost: 25.00 },
   
   // GPT-4o models
-  'gpt-4o': { input: 2.50, cached: 1.25, output: 10.00 },
-  'gpt-4o-mini': { input: 0.15, cached: 0.075, output: 0.60 },
-  'gpt-4o-audio-preview': { input: 2.50, cached: null, output: 10.00 },
-  'gpt-4o-realtime-preview': { input: 5.00, cached: 2.50, output: 20.00 },
-  'gpt-4o-mini-audio-preview': { input: 0.15, cached: null, output: 0.60 },
-  'gpt-4o-mini-realtime-preview': { input: 0.60, cached: 0.30, output: 2.40 },
-  'gpt-4o-mini-search-preview': { input: 0.15, cached: null, output: 0.60 },
-  'gpt-4o-search-preview': { input: 2.50, cached: null, output: 10.00 },
+  'gpt-4o': { input: 2.50, cached: 1.25, output: 10.00, webSearchCost: 25.00 },
+  'gpt-4o-mini': { input: 0.15, cached: 0.075, output: 0.60, webSearchCost: 25.00 },
+  'gpt-4o-audio-preview': { input: 2.50, cached: null, output: 10.00, webSearchCost: 25.00 },
+  'gpt-4o-realtime-preview': { input: 5.00, cached: 2.50, output: 20.00, webSearchCost: 25.00 },
+  'gpt-4o-mini-audio-preview': { input: 0.15, cached: null, output: 0.60, webSearchCost: 25.00 },
+  'gpt-4o-mini-realtime-preview': { input: 0.60, cached: 0.30, output: 2.40, webSearchCost: 25.00 },
+  'gpt-4o-mini-search-preview': { input: 0.15, cached: null, output: 0.60, webSearchCost: 25.00 },
+  'gpt-4o-search-preview': { input: 2.50, cached: null, output: 10.00, webSearchCost: 25.00 },
   
   // O1 models
-  'o1': { input: 15.00, cached: 7.50, output: 60.00 },
-  'o1-pro': { input: 150.00, cached: null, output: 600.00 },
-  'o1-mini': { input: 1.10, cached: 0.55, output: 4.40 },
+  'o1': { input: 15.00, cached: 7.50, output: 60.00, webSearchCost: 10.00 },
+  'o1-pro': { input: 150.00, cached: null, output: 600.00, webSearchCost: 10.00 },
+  'o1-mini': { input: 1.10, cached: 0.55, output: 4.40, webSearchCost: 10.00 },
   
   // O3 models
-  'o3': { input: 2.00, cached: 0.50, output: 8.00 },
-  'o3-pro': { input: 20.00, cached: null, output: 80.00 },
-  'o3-mini': { input: 1.10, cached: 0.55, output: 4.40 },
-  'o3-deep-research': { input: 10.00, cached: 2.50, output: 40.00 },
+  'o3': { input: 2.00, cached: 0.50, output: 8.00, webSearchCost: 10.00 },
+  'o3-pro': { input: 20.00, cached: null, output: 80.00, webSearchCost: 10.00 },
+  'o3-mini': { input: 1.10, cached: 0.55, output: 4.40, webSearchCost: 10.00 },
+  'o3-deep-research': { input: 10.00, cached: 2.50, output: 40.00, webSearchCost: 10.00 },
   
   // O4 models
-  'o4-mini': { input: 1.10, cached: 0.275, output: 4.40 },
-  'o4-mini-deep-research': { input: 2.00, cached: 0.50, output: 8.00 },
+  'o4-mini': { input: 1.10, cached: 0.275, output: 4.40, webSearchCost: 10.00 },
+  'o4-mini-deep-research': { input: 2.00, cached: 0.50, output: 8.00, webSearchCost: 10.00 },
   
   // Legacy models (fallback pricing)
-  'gpt-4': { input: 30.00, cached: null, output: 60.00 },
-  'gpt-4-turbo': { input: 10.00, cached: null, output: 30.00 },
-  'gpt-3.5-turbo': { input: 1.50, cached: null, output: 2.00 },
+  'gpt-4': { input: 30.00, cached: null, output: 60.00, webSearchCost: 25.00 },
+  'gpt-4-turbo': { input: 10.00, cached: null, output: 30.00, webSearchCost: 25.00 },
+  'gpt-3.5-turbo': { input: 1.50, cached: null, output: 2.00, webSearchCost: 25.00 },
   
   // Special models
-  'computer-use-preview': { input: 3.00, cached: null, output: 12.00 },
-  'codex-mini-latest': { input: 1.50, cached: 0.375, output: 6.00 },
-  'gpt-image-1': { input: 5.00, cached: 1.25, output: null }
+  'computer-use-preview': { input: 3.00, cached: null, output: 12.00, webSearchCost: 25.00 },
+  'codex-mini-latest': { input: 1.50, cached: 0.375, output: 6.00, webSearchCost: 25.00 },
+  'gpt-image-1': { input: 5.00, cached: 1.25, output: null, webSearchCost: 25.00 }
 } as const;
 
 // Helper function to calculate cost based on model and token usage
@@ -138,7 +138,8 @@ export function calculateOpenAICost(
   model: string, 
   inputTokens: number, 
   outputTokens: number,
-  cachedTokens: number = 0
+  cachedTokens: number = 0,
+  webSearchEnabled: boolean = false
 ): number {
   const pricing = OPENAI_PRICING[model as keyof typeof OPENAI_PRICING];
   
@@ -167,11 +168,19 @@ export function calculateOpenAICost(
     cost += (outputTokens / 1_000_000) * pricing.output;
   }
   
+  // Add web search cost if enabled
+  if (webSearchEnabled && pricing.webSearchCost) {
+    // Web search cost is per call, not per token
+    // For GPT-4o and GPT-4.1 models: $25.00 per 1K calls
+    // For O3 and O4-mini models: $10.00 per 1K calls
+    cost += (pricing.webSearchCost / 1000); // Convert to per-call cost
+  }
+  
   return cost;
 }
 
 // Simplified cost estimation for UI display (without cached tokens)
-export function estimateCost(tokens: number, model: string): string {
-  const cost = calculateOpenAICost(model, tokens, 0);
+export function estimateCost(tokens: number, model: string, webSearchEnabled: boolean = false): string {
+  const cost = calculateOpenAICost(model, tokens, 0, 0, webSearchEnabled);
   return cost.toFixed(4);
 } 

@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch } from "@/lib/ai-chat-config"
+import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch, estimateCost } from "@/lib/ai-chat-config"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -48,48 +48,49 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [config, setConfig] = useState<AIChatConfig>(DEFAULT_CONFIG)
   const [showConfig, setShowConfig] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
-  const [selectedPromptVariant, setSelectedPromptVariant] = useState("custom")
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [selectedPromptVariant, setSelectedPromptVariant] = useState("custom")
   const [totalTokensUsed, setTotalTokensUsed] = useState(0)
+  const [totalCost, setTotalCost] = useState(0)
+  const [config, setConfig] = useState<AIChatConfig>(DEFAULT_CONFIG)
 
   // Load config from localStorage on mount
   useEffect(() => {
     const savedConfig = localStorage.getItem("ai-chat-config")
-    console.log("Loading saved config:", savedConfig)
     if (savedConfig) {
       try {
-        const parsed = JSON.parse(savedConfig)
-        console.log("Parsed config:", parsed)
-        // Only merge non-empty values to preserve existing API key
-        const mergedConfig = { ...DEFAULT_CONFIG }
-        Object.keys(parsed).forEach(key => {
-          if (key === 'apiKey') {
-            // Only set API key if it exists and is not empty
-            if (parsed.apiKey && parsed.apiKey.trim() !== '') {
-              mergedConfig.apiKey = parsed.apiKey
-              console.log("Loaded API key:", parsed.apiKey.substring(0, 10) + "...")
-            }
-          } else if (parsed[key] !== undefined && parsed[key] !== null) {
-            ;(mergedConfig as any)[key] = parsed[key]
-          }
-        })
-        console.log("Final merged config:", mergedConfig)
-        setConfig(mergedConfig)
-        
-        // Set the selected prompt variant based on the loaded system prompt
-        const systemPrompt = mergedConfig.systemPrompt
-        const variant = Object.entries(SYSTEM_PROMPT_VARIANTS).find(([_, prompt]) => prompt === systemPrompt)
-        if (variant) {
-          setSelectedPromptVariant(variant[0])
-        }
+        const parsedConfig = JSON.parse(savedConfig)
+        setConfig(parsedConfig)
+        console.log("Loaded saved config:", { ...parsedConfig, apiKey: parsedConfig.apiKey ? parsedConfig.apiKey.substring(0, 10) + "..." : "" })
       } catch (error) {
         console.error("Error loading chat config:", error)
       }
     } else {
       console.log("No saved config found, using defaults")
+    }
+    
+    // Load saved token usage
+    const savedTokenUsage = localStorage.getItem("ai-chat-token-usage")
+    if (savedTokenUsage) {
+      try {
+        const parsedTokenUsage = parseInt(savedTokenUsage, 10)
+        setTotalTokensUsed(parsedTokenUsage)
+      } catch (error) {
+        console.error("Error loading token usage:", error)
+      }
+    }
+    
+    // Load saved cost
+    const savedCost = localStorage.getItem("ai-chat-total-cost")
+    if (savedCost) {
+      try {
+        const parsedCost = parseFloat(savedCost)
+        setTotalCost(parsedCost)
+      } catch (error) {
+        console.error("Error loading cost:", error)
+      }
     }
   }, [])
 
@@ -146,6 +147,16 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
       const data = await response.json()
       console.log("Data:", data)
       
+      // Update token usage if provided in response
+      if (data.tokenUsage) {
+        const newTotal = totalTokensUsed + data.tokenUsage
+        const newCost = totalCost + parseFloat(data.estimatedCost || '0')
+        setTotalTokensUsed(newTotal)
+        setTotalCost(newCost)
+        localStorage.setItem("ai-chat-token-usage", newTotal.toString())
+        localStorage.setItem("ai-chat-total-cost", newCost.toString())
+      }
+      
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
@@ -178,6 +189,10 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
 
   const clearChat = () => {
     setMessages([])
+    setTotalTokensUsed(0)
+    setTotalCost(0)
+    localStorage.removeItem("ai-chat-token-usage")
+    localStorage.removeItem("ai-chat-total-cost")
   }
 
   const handlePromptVariantChange = (variant: string) => {
@@ -227,6 +242,14 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
           <CardTitle className="text-foreground">AI Investment Analyst</CardTitle>
         </div>
         <div className="flex items-center space-x-2">
+          {totalTokensUsed > 0 && (
+            <div 
+              className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded cursor-help"
+              title={`Total tokens used in this session: ${totalTokensUsed.toLocaleString()}\nActual cost: $${totalCost.toFixed(4)}`}
+            >
+              {totalTokensUsed.toLocaleString()} tokens • ${totalCost.toFixed(4)}
+            </div>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -251,8 +274,13 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-medium text-foreground">Portfolio Summary</div>
             {config.compressionLevel && config.compressionLevel !== 'none' && (
-              <div className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
-                Compression: {config.compressionLevel}
+              <div className="flex items-center space-x-2">
+                <div className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                  Compression: {config.compressionLevel}
+                </div>
+                <div className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                  ~${estimateCost(estimateTokenUsage(portfolioData, 'none') - estimateTokenUsage(portfolioData, config.compressionLevel), config.model)} saved
+                </div>
               </div>
             )}
           </div>
@@ -414,14 +442,21 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
           >
             <Globe className={config.webSearchEnabled ? "text-blue-600" : "text-muted-foreground"} />
           </Button>
-          <Input
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask about your portfolio, risk analysis, or strategies..."
-            disabled={isLoading || loading}
-            className="flex-1"
-          />
+          <div className="flex-1 relative">
+            <Input
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask about your portfolio, risk analysis, or strategies..."
+              disabled={isLoading || loading}
+              className="flex-1"
+            />
+            {config.compressionLevel && config.compressionLevel !== 'none' && (
+              <div className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-muted-foreground">
+                ~{estimateTokenUsage(portfolioData, config.compressionLevel)} tokens • ~${estimateCost(estimateTokenUsage(portfolioData, config.compressionLevel), config.model)}
+              </div>
+            )}
+          </div>
           <Button
             onClick={sendMessage}
             disabled={!inputValue.trim() || isLoading || loading}
@@ -558,6 +593,21 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
                 Estimated tokens: {estimateTokenUsage(portfolioData, config.compressionLevel || 'none')}
               </div>
             </div>
+            
+            {/* Token Usage Summary */}
+            {totalTokensUsed > 0 && (
+              <div className="bg-muted/30 rounded-lg p-3">
+                <Label className="text-sm font-medium">Current Session Usage</Label>
+                <div className="text-xs text-muted-foreground mt-1 space-y-1">
+                  <div>Total tokens used: {totalTokensUsed.toLocaleString()}</div>
+                  <div>Actual cost: ${totalCost.toFixed(4)}</div>
+                  <div className="text-xs text-orange-600">
+                    Cost varies by model. GPT-4o is ~$0.0025/1K input tokens, GPT-4o-mini is ~$0.00015/1K input tokens
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end space-x-2">
               <Button
                 variant="outline"

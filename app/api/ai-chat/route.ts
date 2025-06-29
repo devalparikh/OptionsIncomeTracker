@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
+import { calculateOpenAICost } from "@/lib/ai-chat-config"
 
 interface Message {
   id: string
@@ -339,9 +340,23 @@ export async function POST(request: NextRequest) {
     console.log("Extracted content length:", content?.length)
     console.log("Extracted sources:", sources)
     
+    // Calculate token usage for this request
+    const inputTokens = openaiResponse.usage?.input_tokens || 0
+    const outputTokens = openaiResponse.usage?.output_tokens || 0
+    const totalTokens = openaiResponse.usage?.total_tokens || 0
+    const cachedTokens = openaiResponse.usage?.input_tokens_details?.cached_tokens || 0
+    
+    // Calculate cost using the new pricing function
+    const estimatedCost = calculateOpenAICost(config.model, inputTokens, outputTokens, cachedTokens)
+    
     return NextResponse.json({ 
       content,
-      sources: sources.length > 0 ? sources : undefined
+      sources: sources.length > 0 ? sources : undefined,
+      tokenUsage: totalTokens,
+      inputTokens,
+      outputTokens,
+      cachedTokens,
+      estimatedCost: estimatedCost.toFixed(4)
     })
 
   } catch (error) {

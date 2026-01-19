@@ -40,30 +40,137 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No valid trades found in CSV' }, { status: 400 })
     }
 
-    // Get user's default portfolio
+    // Ensure user has a profile (accounts.user_id references profiles.id)
+    let profileId = user.id
+    const { data: existingProfile, error: profileCheckError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (profileCheckError && profileCheckError.code !== 'PGRST116') {
+      console.error('Profile check error:', profileCheckError)
+      return NextResponse.json({ error: `Error checking profile: ${profileCheckError.message}` }, { status: 500 })
+    }
+
+    // Create profile if it doesn't exist
+    if (!existingProfile) {
+      const { data: newProfile, error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: user.id,
+          email: user.email || '',
+          full_name: user.user_metadata?.full_name || null,
+        })
+        .select('id')
+        .single()
+
+      if (profileError) {
+        console.error('Profile creation error:', profileError)
+        // If profile creation fails (e.g., duplicate), try to fetch it again
+        const { data: retryProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (!retryProfile) {
+          return NextResponse.json({ error: `Failed to create profile: ${profileError.message}` }, { status: 500 })
+        }
+        profileId = retryProfile.id
+      } else if (newProfile) {
+        profileId = newProfile.id
+      } else {
+        return NextResponse.json({ error: 'Failed to create profile: No data returned' }, { status: 500 })
+      }
+    }
+
+    // Verify profile exists before creating account
+    const { data: verifiedProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', profileId)
+      .single()
+
+    if (!verifiedProfile) {
+      return NextResponse.json({ error: 'Profile does not exist. Please contact support.' }, { status: 500 })
+    }
+
+    // Get or create the user's account (user_id must reference profiles.id)
     const { data: accounts, error: accountError } = await supabase
       .from('accounts')
       .select('id')
-      .eq('user_id', user.id)
+      .eq('user_id', profileId)
       .limit(1)
 
-    if (accountError || !accounts || accounts.length === 0) {
-      return NextResponse.json({ error: 'No account found. Please create an account first.' }, { status: 400 })
+    if (accountError) {
+      console.error('Account error:', accountError)
+      return NextResponse.json({ error: 'Error fetching accounts' }, { status: 500 })
     }
 
-    const accountId = accounts[0].id
+    let accountId: string
+    if (!accounts || accounts.length === 0) {
+      // Create default account if none exists (user_id must reference profiles.id)
+      const { data: newAccount, error: createAccountError } = await supabase
+        .from('accounts')
+        .insert({
+          user_id: profileId,
+          name: 'Default Account',
+        })
+        .select('id')
+        .single()
 
+      if (createAccountError) {
+        console.error('Account creation error:', createAccountError)
+        return NextResponse.json({ error: `Failed to create account: ${createAccountError.message}` }, { status: 500 })
+      }
+
+      if (!newAccount) {
+        return NextResponse.json({ error: 'Failed to create account: No data returned' }, { status: 500 })
+      }
+
+      accountId = newAccount.id
+    } else {
+      accountId = accounts[0].id
+    }
+
+    // Get or create the user's portfolio
     const { data: portfolios, error: portfolioError } = await supabase
       .from('portfolios')
       .select('id')
       .eq('account_id', accountId)
       .limit(1)
 
-    if (portfolioError || !portfolios || portfolios.length === 0) {
-      return NextResponse.json({ error: 'No portfolio found. Please create a portfolio first.' }, { status: 400 })
+    if (portfolioError) {
+      console.error('Portfolio error:', portfolioError)
+      return NextResponse.json({ error: 'Error fetching portfolios' }, { status: 500 })
     }
 
-    const portfolioId = portfolios[0].id
+    let portfolioId: string
+    if (!portfolios || portfolios.length === 0) {
+      // Create default portfolio if none exists
+      const { data: newPortfolio, error: createPortfolioError } = await supabase
+        .from('portfolios')
+        .insert({
+          account_id: accountId,
+          name: 'Main Portfolio',
+        })
+        .select('id')
+        .single()
+
+      if (createPortfolioError) {
+        console.error('Portfolio creation error:', createPortfolioError)
+        return NextResponse.json({ error: `Failed to create portfolio: ${createPortfolioError.message}` }, { status: 500 })
+      }
+
+      if (!newPortfolio) {
+        return NextResponse.json({ error: 'Failed to create portfolio: No data returned' }, { status: 500 })
+      }
+
+      portfolioId = newPortfolio.id
+    } else {
+      portfolioId = portfolios[0].id
+    }
 
     // Process trades and store in database
     const result = await processTrades(trades, portfolioId, supabase)

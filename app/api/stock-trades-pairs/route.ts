@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 
     // Transform trade pairs to match the expected format
     const soldTrades = tradePairs.map(pair => ({
-      id: pair.sell_trade_id,
+      id: pair.id || pair.sell_trade_id,
       symbol: pair.symbol,
       open_date: pair.bought_date,
       close_date: pair.sold_date,

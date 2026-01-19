@@ -12,7 +12,7 @@ import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
 import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
-import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare, Headphones } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare, Headphones, ChevronDown, ChevronRight } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 // Add imports at the top
 import { PortfolioValueWidget } from "./portfolio-value-widget"
@@ -176,8 +176,51 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   // Combine expired and closed legs for the closed tab
   const allClosedLegs = [...closedLegs]
 
-  // Process closed legs with monthly summary rows
-  const processedClosedLegsWithSummaries = useMemo(() => {
+  // Get month keys for expansion state initialization
+  const monthKeys = useMemo(() => {
+    if (allClosedLegs.length === 0) return []
+    const keys = new Set<string>()
+    allClosedLegs.forEach((leg) => {
+      const closeOrExpiryDate = leg.closeDate || leg.expiry
+      // Normalize to local date to avoid timezone issues
+      const localDate = new Date(closeOrExpiryDate.getFullYear(), closeOrExpiryDate.getMonth(), closeOrExpiryDate.getDate())
+      const monthKey = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}`
+      keys.add(monthKey)
+    })
+    const sorted = Array.from(keys).sort().reverse() // Most recent first
+    return sorted
+  }, [allClosedLegs])
+
+  // State for expanded months - default to most recent month only
+  const [expandedMonths, setExpandedMonths] = useState<Set<string>>(() => {
+    if (monthKeys.length > 0) {
+      return new Set([monthKeys[0]])
+    }
+    return new Set<string>()
+  })
+
+  // Update expanded months when monthKeys change (e.g., new data loaded) - only on initial load
+  useEffect(() => {
+    if (monthKeys.length > 0 && expandedMonths.size === 0) {
+      setExpandedMonths(new Set([monthKeys[0]]))
+    }
+  }, [monthKeys])
+
+  // Toggle month expansion
+  const toggleMonth = (monthKey: string) => {
+    setExpandedMonths((prev) => {
+      const next = new Set(prev)
+      if (next.has(monthKey)) {
+        next.delete(monthKey)
+      } else {
+        next.add(monthKey)
+      }
+      return next
+    })
+  }
+
+  // Process closed legs with monthly summary rows - return grouped by month
+  const monthlyGroupedData = useMemo(() => {
     if (allClosedLegs.length === 0) return []
 
     // Sort by close/expiry date (most recent first)
@@ -191,40 +234,33 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     const groupedByMonth = new Map<string, typeof sortedLegs>()
     sortedLegs.forEach((leg) => {
       const closeOrExpiryDate = leg.closeDate || leg.expiry
-      const monthKey = `${closeOrExpiryDate.getFullYear()}-${String(closeOrExpiryDate.getMonth() + 1).padStart(2, '0')}`
+      // Normalize to local date to avoid timezone issues
+      const localDate = new Date(closeOrExpiryDate.getFullYear(), closeOrExpiryDate.getMonth(), closeOrExpiryDate.getDate())
+      const monthKey = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}`
       if (!groupedByMonth.has(monthKey)) {
         groupedByMonth.set(monthKey, [])
       }
       groupedByMonth.get(monthKey)!.push(leg)
     })
 
-    // Create array with legs and summary rows
-    type ProcessedRow = 
-      | { type: 'leg', leg: typeof sortedLegs[0] }
-      | { 
-          type: 'summary',
-          monthData: {
-            monthKey: string
-            monthName: string
-            totalPnL: number
-            totalDaysOpen: number
-            avgROI: number
-            avgROIPerDay: number
-            avgMonthlyROI: number
-            optionsCount: number
-          }
-        }
+    // Create array of month data with their legs
+    type MonthData = {
+      monthKey: string
+      monthName: string
+      totalPnL: number
+      totalDaysOpen: number
+      avgROI: number
+      avgROIPerDay: number
+      avgMonthlyROI: number
+      optionsCount: number
+      legs: typeof sortedLegs
+    }
     
-    const result: ProcessedRow[] = []
+    const result: MonthData[] = []
     const sortedMonthKeys = Array.from(groupedByMonth.keys()).sort().reverse() // Most recent first
 
     sortedMonthKeys.forEach((monthKey) => {
       const monthLegs = groupedByMonth.get(monthKey)!
-      
-      // Add all legs for this month
-      monthLegs.forEach((leg) => {
-        result.push({ type: 'leg', leg })
-      })
 
       // Calculate month summary
       const monthTotalPnL = monthLegs.reduce((sum, leg) => sum + (leg.realized_pnl || 0), 0)
@@ -265,22 +301,21 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       const avgROIPerDay = totalCollateral > 0 ? totalWeightedROIPerDay / totalCollateral : 0
       const avgMonthlyROI = totalCollateral > 0 ? totalWeightedMonthlyROI / totalCollateral : 0
 
-      // Add summary row after the month's legs
-      const date = new Date(monthKey + '-01')
+      // Parse monthKey (format: "YYYY-MM") to create local date
+      const [year, month] = monthKey.split('-').map(Number)
+      const date = new Date(year, month - 1, 1) // month is 0-indexed in Date constructor
       const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
       
       result.push({
-        type: 'summary',
-        monthData: {
-          monthKey,
-          monthName,
-          totalPnL: monthTotalPnL,
-          totalDaysOpen: monthTotalDaysOpen,
-          avgROI,
-          avgROIPerDay,
-          avgMonthlyROI,
-          optionsCount
-        }
+        monthKey,
+        monthName,
+        totalPnL: monthTotalPnL,
+        totalDaysOpen: monthTotalDaysOpen,
+        avgROI,
+        avgROIPerDay,
+        avgMonthlyROI,
+        optionsCount,
+        legs: monthLegs
       })
     })
 
@@ -911,13 +946,24 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {processedClosedLegsWithSummaries.map((row) => {
-                              if (row.type === 'summary') {
-                                const { monthData } = row
-                                return (
-                                  <TableRow key={`summary-${monthData.monthKey}`} className="border-border/50 bg-muted/40 font-semibold">
+                            {monthlyGroupedData.map((monthData) => {
+                              const isExpanded = expandedMonths.has(monthData.monthKey)
+                              return (
+                                <>
+                                  <TableRow 
+                                    key={`summary-${monthData.monthKey}`} 
+                                    className="border-border/50 bg-muted/40 font-semibold cursor-pointer hover:bg-muted/60"
+                                    onClick={() => toggleMonth(monthData.monthKey)}
+                                  >
                                     <TableCell className="font-medium text-foreground whitespace-nowrap">
-                                      {monthData.monthName} Total
+                                      <div className="flex items-center gap-2">
+                                        {isExpanded ? (
+                                          <ChevronDown className="h-4 w-4" />
+                                        ) : (
+                                          <ChevronRight className="h-4 w-4" />
+                                        )}
+                                        {monthData.monthName}
+                                      </div>
                                     </TableCell>
                                     <TableCell className="whitespace-nowrap">-</TableCell>
                                     <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
@@ -938,68 +984,66 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                     </TableCell>
                                     <TableCell className="whitespace-nowrap">-</TableCell>
                                   </TableRow>
-                                )
-                              }
+                                  {/* Render legs for this month only if expanded */}
+                                  {isExpanded && monthData.legs.map((leg) => {
+                                    const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
+                                    const netPL = leg.realized_pnl || 0
+                                    const collateral =
+                                      leg.type === "PUT"
+                                        ? calculateCapitalAtRisk(leg.strike, leg.contracts)
+                                        : leg.strike * 100 * leg.contracts
+                                    const roi = calculateLegROI(netPL, collateral)
+                                    const closeOrExpiryDate = leg.closeDate || leg.expiry
+                                    const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+                                    const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
+                                    const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
 
-                              const leg = row.leg
-                              const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
-                              const netPL = leg.realized_pnl || 0
-                              const collateral =
-                                leg.type === "PUT"
-                                  ? calculateCapitalAtRisk(leg.strike, leg.contracts)
-                                  : leg.strike * 100 * leg.contracts
-                              // TODO: Properly handle ROI calculations for covered calls
-                              // Currently hiding ROI for covered calls as it requires share cost basis
-                              // and proper handling of assignment scenarios
-                              const roi = calculateLegROI(netPL, collateral)
-                              const closeOrExpiryDate = leg.closeDate || leg.expiry
-                              const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
-                              const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
-                              const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
-
-                              return (
-                                <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
-                                  <TableCell className="font-medium text-foreground whitespace-nowrap">{leg.symbol}</TableCell>
-                                  <TableCell className="whitespace-nowrap">
-                                    <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
-                                      {leg.side} {leg.type}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="text-foreground whitespace-nowrap">${leg.strike}</TableCell>
-                                  <TableCell className="text-foreground whitespace-nowrap">{leg.openDate.toLocaleDateString()}</TableCell>
-                                  <TableCell className="text-foreground whitespace-nowrap">{closeOrExpiryDate.toLocaleDateString()}</TableCell>
-                                  <TableCell className="text-foreground whitespace-nowrap">{daysOpen}</TableCell>
-                                  <TableCell className={`whitespace-nowrap ${netPL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    ${netPL.toFixed(2)}
-                                  </TableCell>
-                                  <TableCell className={`whitespace-nowrap ${roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" || leg.type === "CALL" ? `${roiPerDay.toFixed(2)}%` : "-"}
-                                  </TableCell>
-                                  <TableCell className={`whitespace-nowrap ${monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" || leg.type === "CALL" ? (
-                                      <>
-                                        {monthlyROI.toFixed(2)}%
-                                        {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
-                                      </>
-                                    ) : (
-                                      "-"
-                                    )}
-                                  </TableCell>
-                                  <TableCell className={`whitespace-nowrap ${roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                    {leg.type === "PUT" || leg.type === "CALL" ? `${roi.toFixed(2)}%` : "-"}
-                                  </TableCell>
-                                  <TableCell className="whitespace-nowrap">
-                                    <Badge variant={
-                                      leg.is_assigned ? "destructive" : 
-                                      leg.is_exercised ? "secondary" : 
-                                      "outline"
-                                    }>
-                                      {leg.is_assigned ? "Assigned" : 
-                                       leg.is_exercised ? "Expired" : 
-                                       "Closed"}
-                                    </Badge>
-                                  </TableCell>
-                                </TableRow>
+                                    return (
+                                      <TableRow key={leg.id} className="border-border/50 hover:bg-muted/20">
+                                        <TableCell className="font-medium text-foreground whitespace-nowrap">{leg.symbol}</TableCell>
+                                        <TableCell className="whitespace-nowrap">
+                                          <Badge variant={leg.type === "PUT" ? "destructive" : "default"}>
+                                            {leg.side} {leg.type}
+                                          </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-foreground whitespace-nowrap">${leg.strike}</TableCell>
+                                        <TableCell className="text-foreground whitespace-nowrap">{leg.openDate.toLocaleDateString()}</TableCell>
+                                        <TableCell className="text-foreground whitespace-nowrap">{closeOrExpiryDate.toLocaleDateString()}</TableCell>
+                                        <TableCell className="text-foreground whitespace-nowrap">{daysOpen}</TableCell>
+                                        <TableCell className={`whitespace-nowrap ${netPL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                          ${netPL.toFixed(2)}
+                                        </TableCell>
+                                        <TableCell className={`whitespace-nowrap ${roiPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                          {leg.type === "PUT" || leg.type === "CALL" ? `${roiPerDay.toFixed(2)}%` : "-"}
+                                        </TableCell>
+                                        <TableCell className={`whitespace-nowrap ${monthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                          {leg.type === "PUT" || leg.type === "CALL" ? (
+                                            <>
+                                              {monthlyROI.toFixed(2)}%
+                                              {daysOpen < 30 && <span className="text-xs text-muted-foreground ml-1">(ext)</span>}
+                                            </>
+                                          ) : (
+                                            "-"
+                                          )}
+                                        </TableCell>
+                                        <TableCell className={`whitespace-nowrap ${roi >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                          {leg.type === "PUT" || leg.type === "CALL" ? `${roi.toFixed(2)}%` : "-"}
+                                        </TableCell>
+                                        <TableCell className="whitespace-nowrap">
+                                          <Badge variant={
+                                            leg.is_assigned ? "destructive" : 
+                                            leg.is_exercised ? "secondary" : 
+                                            "outline"
+                                          }>
+                                            {leg.is_assigned ? "Assigned" : 
+                                             leg.is_exercised ? "Expired" : 
+                                             "Closed"}
+                                          </Badge>
+                                        </TableCell>
+                                      </TableRow>
+                                    )
+                                  })}
+                                </>
                               )
                             })}
                           </TableBody>

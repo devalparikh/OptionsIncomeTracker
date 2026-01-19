@@ -211,11 +211,11 @@ export function StockTradesTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.soldTrades.map((trade) => {
+                {data.soldTrades.map((trade, index) => {
                   const returnPercentage = formatPercentage(trade.realized_pnl, trade.proceeds || 0)
                   
                   return (
-                    <TableRow key={trade.id}>
+                    <TableRow key={`${trade.id}-${index}`}>
                       <TableCell className="font-medium">
                         {trade.positions.symbol}
                       </TableCell>

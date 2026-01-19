@@ -1,15 +1,13 @@
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
-import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { ProfileSettings } from "@/components/settings/profile-settings"
 import { PurgeDataButton } from "@/components/purge-data-button"
 import { RobinhoodUpload } from "@/components/RobinhoodUpload"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { createServerClient } from "@/lib/supabase/server"
 
 export default async function SettingsPage() {
-  const cookieStore = cookies()
-  const supabase = createServerComponentClient({ cookies: () => cookieStore })
+  const supabase = await createServerClient()
   
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   

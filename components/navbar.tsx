@@ -56,10 +56,7 @@ export function Navbar({ onNewEntry }: NavbarProps) {
                 <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
               </div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-lg sm:text-xl font-bold text-foreground">Options Wheel</h1>
-                <Badge variant="outline" className="text-xs hidden sm:inline-flex">
-                  MVP
-                </Badge>
+                <h1 className="text-lg sm:text-xl font-bold text-foreground">Options Wheel Tracker</h1>
               </div>
             </div>
           </Link>

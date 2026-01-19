@@ -176,6 +176,117 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
   // Combine expired and closed legs for the closed tab
   const allClosedLegs = [...closedLegs]
 
+  // Process closed legs with monthly summary rows
+  const processedClosedLegsWithSummaries = useMemo(() => {
+    if (allClosedLegs.length === 0) return []
+
+    // Sort by close/expiry date (most recent first)
+    const sortedLegs = [...allClosedLegs].sort((a, b) => {
+      const dateA = (a.closeDate || a.expiry).getTime()
+      const dateB = (b.closeDate || b.expiry).getTime()
+      return dateB - dateA
+    })
+
+    // Group by month
+    const groupedByMonth = new Map<string, typeof sortedLegs>()
+    sortedLegs.forEach((leg) => {
+      const closeOrExpiryDate = leg.closeDate || leg.expiry
+      const monthKey = `${closeOrExpiryDate.getFullYear()}-${String(closeOrExpiryDate.getMonth() + 1).padStart(2, '0')}`
+      if (!groupedByMonth.has(monthKey)) {
+        groupedByMonth.set(monthKey, [])
+      }
+      groupedByMonth.get(monthKey)!.push(leg)
+    })
+
+    // Create array with legs and summary rows
+    type ProcessedRow = 
+      | { type: 'leg', leg: typeof sortedLegs[0] }
+      | { 
+          type: 'summary',
+          monthData: {
+            monthKey: string
+            monthName: string
+            totalPnL: number
+            totalDaysOpen: number
+            avgROI: number
+            avgROIPerDay: number
+            avgMonthlyROI: number
+            optionsCount: number
+          }
+        }
+    
+    const result: ProcessedRow[] = []
+    const sortedMonthKeys = Array.from(groupedByMonth.keys()).sort().reverse() // Most recent first
+
+    sortedMonthKeys.forEach((monthKey) => {
+      const monthLegs = groupedByMonth.get(monthKey)!
+      
+      // Add all legs for this month
+      monthLegs.forEach((leg) => {
+        result.push({ type: 'leg', leg })
+      })
+
+      // Calculate month summary
+      const monthTotalPnL = monthLegs.reduce((sum, leg) => sum + (leg.realized_pnl || 0), 0)
+      const monthTotalDaysOpen = monthLegs.reduce((sum, leg) => {
+        const closeOrExpiryDate = leg.closeDate || leg.expiry
+        const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+        return sum + daysOpen
+      }, 0)
+      
+      // Calculate weighted averages for ROI metrics
+      let totalWeightedROI = 0
+      let totalWeightedROIPerDay = 0
+      let totalWeightedMonthlyROI = 0
+      let totalCollateral = 0
+      let optionsCount = 0
+
+      monthLegs.forEach((leg) => {
+        if (leg.type === "PUT" || leg.type === "CALL") {
+          optionsCount++
+          const netPL = leg.realized_pnl || 0
+          const collateral = leg.type === "PUT"
+            ? calculateCapitalAtRisk(leg.strike, leg.contracts)
+            : leg.strike * 100 * leg.contracts
+          const closeOrExpiryDate = leg.closeDate || leg.expiry
+          const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+          const roi = calculateLegROI(netPL, collateral)
+          const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
+          const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
+
+          totalCollateral += collateral
+          totalWeightedROI += roi * collateral
+          totalWeightedROIPerDay += roiPerDay * collateral
+          totalWeightedMonthlyROI += monthlyROI * collateral
+        }
+      })
+
+      const avgROI = totalCollateral > 0 ? totalWeightedROI / totalCollateral : 0
+      const avgROIPerDay = totalCollateral > 0 ? totalWeightedROIPerDay / totalCollateral : 0
+      const avgMonthlyROI = totalCollateral > 0 ? totalWeightedMonthlyROI / totalCollateral : 0
+
+      // Add summary row after the month's legs
+      const date = new Date(monthKey + '-01')
+      const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      
+      result.push({
+        type: 'summary',
+        monthData: {
+          monthKey,
+          monthName,
+          totalPnL: monthTotalPnL,
+          totalDaysOpen: monthTotalDaysOpen,
+          avgROI,
+          avgROIPerDay,
+          avgMonthlyROI,
+          optionsCount
+        }
+      })
+    })
+
+    return result
+  }, [allClosedLegs])
+
   // Group legs by position for analysis
   const positionGroups = useMemo(() => {
     const groups = new Map<string, typeof legs>()
@@ -800,7 +911,37 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {allClosedLegs.map((leg) => {
+                            {processedClosedLegsWithSummaries.map((row) => {
+                              if (row.type === 'summary') {
+                                const { monthData } = row
+                                return (
+                                  <TableRow key={`summary-${monthData.monthKey}`} className="border-border/50 bg-muted/40 font-semibold">
+                                    <TableCell className="font-medium text-foreground whitespace-nowrap">
+                                      {monthData.monthName} Total
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap">-</TableCell>
+                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                    <TableCell className="text-foreground whitespace-nowrap">{monthData.totalDaysOpen}</TableCell>
+                                    <TableCell className={`whitespace-nowrap ${monthData.totalPnL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                      ${monthData.totalPnL.toFixed(2)}
+                                    </TableCell>
+                                    <TableCell className={`whitespace-nowrap ${monthData.avgROIPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                      {monthData.optionsCount > 0 ? `${monthData.avgROIPerDay.toFixed(2)}%` : "-"}
+                                    </TableCell>
+                                    <TableCell className={`whitespace-nowrap ${monthData.avgMonthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                      {monthData.optionsCount > 0 ? `${monthData.avgMonthlyROI.toFixed(2)}%` : "-"}
+                                    </TableCell>
+                                    <TableCell className={`whitespace-nowrap ${monthData.avgROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                      {monthData.optionsCount > 0 ? `${monthData.avgROI.toFixed(2)}%` : "-"}
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap">-</TableCell>
+                                  </TableRow>
+                                )
+                              }
+
+                              const leg = row.leg
                               const isExpiredContract = !leg.closeDate && isExpired(leg.expiry)
                               const netPL = leg.realized_pnl || 0
                               const collateral =

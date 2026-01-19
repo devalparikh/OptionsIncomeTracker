@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, Fragment } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,8 +12,9 @@ import { PositionAnalysisCard } from "./position-analysis-card"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useLegsData } from "@/hooks/use-legs-data"
 import { calculatePremiumIncome, calculateCapitalAtRisk, calculateLegROI, calculateROIPerDay, calculateMonthlyROI } from "@/utils/calculations"
-import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare, Headphones, ChevronDown, ChevronRight } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Target, BarChart3, Loader2, AlertCircle, Activity, Share, MessageSquare, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 // Add imports at the top
 import { PortfolioValueWidget } from "./portfolio-value-widget"
 import { SharesAtRiskWidget } from "./shares-at-risk-widget"
@@ -219,7 +220,23 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     })
   }
 
-  // Process closed legs with monthly summary rows - return grouped by month
+  // Helper function to calculate days overlap between a contract's active period and a specific month
+  const getDaysActiveInMonth = (openDate: Date, closeOrExpiryDate: Date, monthStart: Date, monthEnd: Date): number => {
+    const contractStart = new Date(Math.max(openDate.getTime(), monthStart.getTime()))
+    const contractEnd = new Date(Math.min(closeOrExpiryDate.getTime(), monthEnd.getTime()))
+    
+    if (contractStart > contractEnd) return 0
+    
+    // Calculate the number of calendar days (inclusive)
+    // Normalize to midnight for accurate day counting
+    const startDay = new Date(contractStart.getFullYear(), contractStart.getMonth(), contractStart.getDate())
+    const endDay = new Date(contractEnd.getFullYear(), contractEnd.getMonth(), contractEnd.getDate())
+    
+    const daysDiff = Math.floor((endDay.getTime() - startDay.getTime()) / (1000 * 60 * 60 * 24)) + 1
+    return Math.max(1, daysDiff)
+  }
+
+  // Process closed legs with monthly summary rows using Capital-Days method for real ROI
   const monthlyGroupedData = useMemo(() => {
     if (allClosedLegs.length === 0) return []
 
@@ -230,17 +247,24 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
       return dateB - dateA
     })
 
-    // Group by month
-    const groupedByMonth = new Map<string, typeof sortedLegs>()
+    // Find all unique months that any contract was active in
+    const monthsSet = new Set<string>()
     sortedLegs.forEach((leg) => {
-      const closeOrExpiryDate = leg.closeDate || leg.expiry
-      // Normalize to local date to avoid timezone issues
-      const localDate = new Date(closeOrExpiryDate.getFullYear(), closeOrExpiryDate.getMonth(), closeOrExpiryDate.getDate())
-      const monthKey = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}`
-      if (!groupedByMonth.has(monthKey)) {
-        groupedByMonth.set(monthKey, [])
+      const openDate = new Date(leg.openDate.getFullYear(), leg.openDate.getMonth(), leg.openDate.getDate())
+      const closeOrExpiryDate = new Date(
+        (leg.closeDate || leg.expiry).getFullYear(),
+        (leg.closeDate || leg.expiry).getMonth(),
+        (leg.closeDate || leg.expiry).getDate()
+      )
+      
+      // Add all months from open to close
+      const currentDate = new Date(openDate)
+      while (currentDate <= closeOrExpiryDate) {
+        const monthKey = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`
+        monthsSet.add(monthKey)
+        // Move to first day of next month
+        currentDate.setMonth(currentDate.getMonth() + 1, 1)
       }
-      groupedByMonth.get(monthKey)!.push(leg)
     })
 
     // Create array of month data with their legs
@@ -257,23 +281,33 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     }
     
     const result: MonthData[] = []
-    const sortedMonthKeys = Array.from(groupedByMonth.keys()).sort().reverse() // Most recent first
+    const sortedMonthKeys = Array.from(monthsSet).sort().reverse() // Most recent first
 
     sortedMonthKeys.forEach((monthKey) => {
-      const monthLegs = groupedByMonth.get(monthKey)!
+      // Parse monthKey to get month boundaries
+      const [year, month] = monthKey.split('-').map(Number)
+      const monthStart = new Date(year, month - 1, 1) // month is 0-indexed
+      const monthEnd = new Date(year, month, 0, 23, 59, 59, 999) // Last moment of the month
+      const daysInMonth = monthEnd.getDate()
 
-      // Calculate month summary
-      const monthTotalPnL = monthLegs.reduce((sum, leg) => sum + (leg.realized_pnl || 0), 0)
-      const monthTotalDaysOpen = monthLegs.reduce((sum, leg) => {
-        const closeOrExpiryDate = leg.closeDate || leg.expiry
-        const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
-        return sum + daysOpen
-      }, 0)
-      
-      // Calculate weighted averages for ROI metrics
+      // Find all contracts that were active during this month
+      const monthLegs = sortedLegs.filter((leg) => {
+        const openDate = new Date(leg.openDate.getFullYear(), leg.openDate.getMonth(), leg.openDate.getDate())
+        const closeOrExpiryDate = new Date(
+          (leg.closeDate || leg.expiry).getFullYear(),
+          (leg.closeDate || leg.expiry).getMonth(),
+          (leg.closeDate || leg.expiry).getDate()
+        )
+        // Contract overlaps with month if it started before month ended and ended after month started
+        return openDate <= monthEnd && closeOrExpiryDate >= monthStart
+      })
+
+      // Capital-Days Method: Calculate real monthly ROI
+      let totalCapitalDays = 0
+      let totalMonthlyPnL = 0
+      let totalDaysOpen = 0
       let totalWeightedROI = 0
       let totalWeightedROIPerDay = 0
-      let totalWeightedMonthlyROI = 0
       let totalCollateral = 0
       let optionsCount = 0
 
@@ -284,36 +318,57 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
           const collateral = leg.type === "PUT"
             ? calculateCapitalAtRisk(leg.strike, leg.contracts)
             : leg.strike * 100 * leg.contracts
-          const closeOrExpiryDate = leg.closeDate || leg.expiry
-          const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - leg.openDate.getTime()) / (1000 * 60 * 60 * 24)))
+          
+          const openDate = new Date(leg.openDate.getFullYear(), leg.openDate.getMonth(), leg.openDate.getDate())
+          const closeOrExpiryDate = new Date(
+            (leg.closeDate || leg.expiry).getFullYear(),
+            (leg.closeDate || leg.expiry).getMonth(),
+            (leg.closeDate || leg.expiry).getDate()
+          )
+          
+          const daysOpen = Math.max(1, Math.ceil((closeOrExpiryDate.getTime() - openDate.getTime()) / (1000 * 60 * 60 * 24)))
+          const daysActiveInMonth = getDaysActiveInMonth(openDate, closeOrExpiryDate, monthStart, monthEnd)
+          
+          // Calculate capital-days for this contract in this month
+          const capitalDays = collateral * daysActiveInMonth
+          totalCapitalDays += capitalDays
+          
+          // Allocate P&L proportionally to days active in this month
+          const pnlAllocation = (daysActiveInMonth / daysOpen) * netPL
+          totalMonthlyPnL += pnlAllocation
+          
+          // For legacy metrics (still calculated per contract)
           const roi = calculateLegROI(netPL, collateral)
           const roiPerDay = calculateROIPerDay(netPL, collateral, daysOpen)
-          const monthlyROI = calculateMonthlyROI(netPL, collateral, daysOpen)
-
+          
+          totalDaysOpen += daysOpen
           totalCollateral += collateral
           totalWeightedROI += roi * collateral
           totalWeightedROIPerDay += roiPerDay * collateral
-          totalWeightedMonthlyROI += monthlyROI * collateral
         }
       })
 
+      // Calculate effective capital for the month (Capital-Days Method)
+      const effectiveCapital = daysInMonth > 0 ? totalCapitalDays / daysInMonth : 0
+      
+      // Calculate REAL monthly ROI using Capital-Days method
+      const realMonthlyROI = effectiveCapital > 0 ? (totalMonthlyPnL / effectiveCapital) * 100 : 0
+
       const avgROI = totalCollateral > 0 ? totalWeightedROI / totalCollateral : 0
       const avgROIPerDay = totalCollateral > 0 ? totalWeightedROIPerDay / totalCollateral : 0
-      const avgMonthlyROI = totalCollateral > 0 ? totalWeightedMonthlyROI / totalCollateral : 0
 
       // Parse monthKey (format: "YYYY-MM") to create local date
-      const [year, month] = monthKey.split('-').map(Number)
-      const date = new Date(year, month - 1, 1) // month is 0-indexed in Date constructor
+      const date = new Date(year, month - 1, 1)
       const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
       
       result.push({
         monthKey,
         monthName,
-        totalPnL: monthTotalPnL,
-        totalDaysOpen: monthTotalDaysOpen,
+        totalPnL: totalMonthlyPnL,
+        totalDaysOpen,
         avgROI,
         avgROIPerDay,
-        avgMonthlyROI,
+        avgMonthlyROI: realMonthlyROI,
         optionsCount,
         legs: monthLegs
       })
@@ -925,60 +980,81 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                   {allClosedLegs.length === 0 ? (
                     <div className="text-center py-8 text-muted-foreground">No closed or expired positions yet.</div>
                   ) : (
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none md:hidden" />
-                      <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none md:hidden" />
-                      <div className="overflow-x-auto scrollbar-none">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="border-border/50">
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Symbol</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Type</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Strike</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Open Date</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Close/Expiry Date</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Days Open</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Net P/L</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">ROI/Day</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Monthly ROI</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">ROI</TableHead>
-                              <TableHead className="text-muted-foreground whitespace-nowrap">Status</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {monthlyGroupedData.map((monthData) => {
-                              const isExpanded = expandedMonths.has(monthData.monthKey)
-                              return (
-                                <>
-                                  <TableRow 
-                                    key={`summary-${monthData.monthKey}`} 
-                                    className="border-border/50 bg-muted/40 font-semibold cursor-pointer hover:bg-muted/60"
-                                    onClick={() => toggleMonth(monthData.monthKey)}
-                                  >
-                                    <TableCell className="font-medium text-foreground whitespace-nowrap">
-                                      <div className="flex items-center gap-2">
-                                        {isExpanded ? (
-                                          <ChevronDown className="h-4 w-4" />
-                                        ) : (
-                                          <ChevronRight className="h-4 w-4" />
-                                        )}
-                                        {monthData.monthName}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="whitespace-nowrap">-</TableCell>
-                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
-                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
-                                    <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
-                                    <TableCell className="text-foreground whitespace-nowrap">{monthData.totalDaysOpen}</TableCell>
-                                    <TableCell className={`whitespace-nowrap ${monthData.totalPnL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                      ${monthData.totalPnL.toFixed(2)}
-                                    </TableCell>
-                                    <TableCell className={`whitespace-nowrap ${monthData.avgROIPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                      {monthData.optionsCount > 0 ? `${monthData.avgROIPerDay.toFixed(2)}%` : "-"}
-                                    </TableCell>
-                                    <TableCell className={`whitespace-nowrap ${monthData.avgMonthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
-                                      {monthData.optionsCount > 0 ? `${monthData.avgMonthlyROI.toFixed(2)}%` : "-"}
-                                    </TableCell>
+                    <TooltipProvider>
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-background to-transparent z-10 pointer-events-none md:hidden" />
+                        <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent z-10 pointer-events-none md:hidden" />
+                        <div className="overflow-x-auto scrollbar-none">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="border-border/50">
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Symbol</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Type</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Strike</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Open Date</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Close/Expiry Date</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Days Open</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Net P/L</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">ROI/Day</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Monthly ROI</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">ROI</TableHead>
+                                <TableHead className="text-muted-foreground whitespace-nowrap">Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {monthlyGroupedData.map((monthData, index) => {
+                                const isExpanded = expandedMonths.has(monthData.monthKey)
+                                const isFirstMonth = index === 0
+                                return (
+                                  <Fragment key={monthData.monthKey}>
+                                    <TableRow 
+                                      key={`summary-${monthData.monthKey}`} 
+                                      className="border-border/50 bg-muted/40 font-semibold cursor-pointer hover:bg-muted/60"
+                                      onClick={() => toggleMonth(monthData.monthKey)}
+                                    >
+                                      <TableCell className="font-medium text-foreground whitespace-nowrap">
+                                        <div className="flex items-center gap-2">
+                                          {isExpanded ? (
+                                            <ChevronDown className="h-4 w-4" />
+                                          ) : (
+                                            <ChevronRight className="h-4 w-4" />
+                                          )}
+                                          {monthData.monthName}
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="whitespace-nowrap">-</TableCell>
+                                      <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                      <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                      <TableCell className="text-foreground whitespace-nowrap">-</TableCell>
+                                      <TableCell className="text-foreground whitespace-nowrap">{monthData.totalDaysOpen}</TableCell>
+                                      <TableCell className={`whitespace-nowrap ${monthData.totalPnL >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                        ${monthData.totalPnL.toFixed(2)}
+                                      </TableCell>
+                                      <TableCell className={`whitespace-nowrap ${monthData.avgROIPerDay >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                        {monthData.optionsCount > 0 ? `${monthData.avgROIPerDay.toFixed(2)}%` : "-"}
+                                      </TableCell>
+                                      <TableCell className={`whitespace-nowrap ${monthData.avgMonthlyROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
+                                        {monthData.optionsCount > 0 ? (
+                                          <div className="flex items-center gap-1.5">
+                                            <span>{monthData.avgMonthlyROI.toFixed(2)}%</span>
+                                            {isFirstMonth && (
+                                              <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                  <Info className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent className="max-w-xs">
+                                                  <p className="font-medium mb-1">Real Monthly ROI (Capital-Days Method)</p>
+                                                  <p className="text-xs text-muted-foreground">
+                                                    Calculated using actual capital deployed during the month, accounting for overlapping contracts. 
+                                                    P&L is allocated proportionally based on days active, and ROI is computed using the effective 
+                                                    average capital (total capital-days ÷ days in month).
+                                                  </p>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            )}
+                                          </div>
+                                        ) : "-"}
+                                      </TableCell>
                                     <TableCell className={`whitespace-nowrap ${monthData.avgROI >= 0 ? "text-green-600 font-medium" : "text-red-600 font-medium"}`}>
                                       {monthData.optionsCount > 0 ? `${monthData.avgROI.toFixed(2)}%` : "-"}
                                     </TableCell>
@@ -1043,13 +1119,14 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
                                       </TableRow>
                                     )
                                   })}
-                                </>
+                                </Fragment>
                               )
                             })}
                           </TableBody>
                         </Table>
                       </div>
                     </div>
+                    </TooltipProvider>
                   )}
                 </CardContent>
               </Card>

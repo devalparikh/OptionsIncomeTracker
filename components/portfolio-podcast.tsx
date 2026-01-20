@@ -23,7 +23,7 @@ import {
   Volume2,
   Globe
 } from "lucide-react"
-import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS } from "@/lib/ai-chat-config"
+import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, OpenAIModel } from "@/lib/ai-chat-config"
 
 interface PortfolioData {
   openLegs: any[]
@@ -119,7 +119,7 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
     ...DEFAULT_CONFIG,
     systemPrompt: PODCAST_SYSTEM_PROMPT,
     maxTokens: 1500,
-    model: "gpt-4o",
+    model: OpenAIModel.GPT_4O,
     webSearchEnabled: true
   })
   const [voice, setVoice] = useState("alloy")
@@ -190,7 +190,7 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
   useEffect(() => {
     // Only save if we have a config with at least some non-default values
     if (config.apiKey || config.systemPrompt !== PODCAST_SYSTEM_PROMPT || 
-        config.model !== "gpt-4o" || config.temperature !== DEFAULT_CONFIG.temperature ||
+        config.model !== OpenAIModel.GPT_4O || config.temperature !== DEFAULT_CONFIG.temperature ||
         config.maxTokens !== 1500 || config.webSearchEnabled !== true) {
       console.log("Saving podcast config to localStorage:", { ...config, apiKey: config.apiKey ? config.apiKey.substring(0, 10) + "..." : "" })
       localStorage.setItem("portfolio-podcast-config", JSON.stringify(config))
@@ -422,7 +422,7 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
       ...DEFAULT_CONFIG,
       systemPrompt: PODCAST_SYSTEM_PROMPT,
       maxTokens: 1500,
-      model: "gpt-4o",
+      model: OpenAIModel.GPT_4O,
       webSearchEnabled: true
     })
     setVoice("alloy")
@@ -852,7 +852,7 @@ export function PortfolioPodcast({ portfolioData, loading }: PortfolioPodcastPro
                   ...DEFAULT_CONFIG, 
                   systemPrompt: PODCAST_SYSTEM_PROMPT, 
                   maxTokens: 1500,
-                  model: "gpt-4o",
+                  model: OpenAIModel.GPT_4O,
                   webSearchEnabled: true
                 })}
               >

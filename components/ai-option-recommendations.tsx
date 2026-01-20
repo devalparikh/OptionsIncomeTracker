@@ -4,10 +4,11 @@ import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { Loader2, Sparkles, AlertCircle, TrendingUp, TrendingDown, Target } from "lucide-react"
+import { Loader2, Sparkles, AlertCircle, TrendingUp, TrendingDown, Target, Edit, Lock } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { AIChatConfig, DEFAULT_CONFIG } from "@/lib/ai-chat-config"
+import { Textarea } from "@/components/ui/textarea"
+import { AIChatConfig, DEFAULT_CONFIG, OpenAIModel } from "@/lib/ai-chat-config"
 
 interface LegWithPosition {
   id: string
@@ -84,6 +85,10 @@ IMPORTANT:
 - Base recommendations on their trading patterns, current market conditions, monthly income target, and risk appetite`
 }
 
+function buildDefaultUserPrompt(): string {
+  return `Based on my trading history, recommend specific option contracts I should consider next.`
+}
+
 function formatContractData(contracts: LegWithPosition[]): string {
   return contracts.slice(0, 5).map((contract, index) => {
     const openPremium = contract.open_price * 100 * contract.contracts
@@ -145,21 +150,12 @@ async function fetchRecommendations(
   contracts: LegWithPosition[], 
   config: AIChatConfig,
   monthlyIncomeTarget: number,
-  riskAppetite: string
+  riskAppetite: string,
+  customUserPrompt?: string
 ): Promise<AIRecommendation[]> {
-  const contractData = formatContractData(contracts)
   const systemPrompt = buildSystemPrompt(monthlyIncomeTarget, riskAppetite)
   
-  const userPrompt = `Based on my last 5 closed/expired contracts, recommend specific option contracts I should consider next. 
-
-MY PREFERENCES:
-- Monthly Income Target: $${monthlyIncomeTarget.toFixed(2)}
-- Risk Appetite: ${riskAppetite}
-
-RECENT CONTRACTS:
-${contractData}
-
-Please analyze my trading patterns and current market conditions to provide 3-5 specific contract recommendations that align with my monthly income target of $${monthlyIncomeTarget.toFixed(2)} and ${riskAppetite.toLowerCase()} risk appetite. Use web search to find current market conditions and stock prices.`
+  const userPrompt = customUserPrompt || buildDefaultUserPrompt()
 
   const response = await fetch("/api/ai-chat", {
     method: "POST",
@@ -185,7 +181,7 @@ Please analyze my trading patterns and current market conditions to provide 3-5 
         ...config,
         systemPrompt: systemPrompt,
         webSearchEnabled: true,
-        model: config.model || "gpt-4o"
+        model: config.model || OpenAIModel.GPT_4O
       }
     })
   })
@@ -252,18 +248,32 @@ export function AIOptionRecommendations({ closedLegs, loading: parentLoading }: 
   const [configError, setConfigError] = useState<string | null>(null)
   const [config, setConfig] = useState<AIChatConfig>({
     ...DEFAULT_CONFIG,
-    model: "gpt-4o",
+    model: OpenAIModel.GPT_4O,
     webSearchEnabled: true
   })
   
   const baselineMonthlyIncome = useMemo(() => calculateHistoricalMonthlyIncome(closedLegs), [closedLegs])
-  const [monthlyIncomeTarget, setMonthlyIncomeTarget] = useState<number>(1000)
+  const [monthlyIncomeTarget, setMonthlyIncomeTarget] = useState<number>(() => {
+    const baseline = calculateHistoricalMonthlyIncome(closedLegs)
+    return baseline > 0 ? baseline : 1000
+  })
   const [hasInitialized, setHasInitialized] = useState(false)
+  const [isPromptEditable, setIsPromptEditable] = useState(false)
+  const [customUserPrompt, setCustomUserPrompt] = useState<string>("")
   
   const riskAppetite = useMemo(() => 
     calculateRiskAppetite(monthlyIncomeTarget, baselineMonthlyIncome),
     [monthlyIncomeTarget, baselineMonthlyIncome]
   )
+
+  const recentContracts = closedLegs.slice(0, 5)
+  const defaultUserPrompt = buildDefaultUserPrompt()
+
+  useEffect(() => {
+    if (!customUserPrompt && defaultUserPrompt) {
+      setCustomUserPrompt(defaultUserPrompt)
+    }
+  }, [defaultUserPrompt])
   
   useEffect(() => {
     if (hasInitialized) return
@@ -348,7 +358,7 @@ export function AIOptionRecommendations({ closedLegs, loading: parentLoading }: 
 
   useEffect(() => {
     if (config.apiKey || config.systemPrompt !== DEFAULT_CONFIG.systemPrompt || 
-        config.model !== "gpt-4o" || config.temperature !== DEFAULT_CONFIG.temperature ||
+        config.model !== OpenAIModel.GPT_4O || config.temperature !== DEFAULT_CONFIG.temperature ||
         config.maxTokens !== DEFAULT_CONFIG.maxTokens || config.webSearchEnabled !== true) {
       localStorage.setItem("ai-recommendations-config", JSON.stringify(config))
     }
@@ -360,7 +370,6 @@ export function AIOptionRecommendations({ closedLegs, loading: parentLoading }: 
     }
   }, [monthlyIncomeTarget])
 
-  const recentContracts = closedLegs.slice(0, 5)
   const hasEnoughContracts = recentContracts.length >= 1
 
   const handleGenerateRecommendations = async () => {
@@ -378,7 +387,8 @@ export function AIOptionRecommendations({ closedLegs, loading: parentLoading }: 
     setConfigError(null)
 
     try {
-      const recs = await fetchRecommendations(recentContracts, config, monthlyIncomeTarget, riskAppetite)
+      const promptToUse = customUserPrompt || defaultUserPrompt
+      const recs = await fetchRecommendations(recentContracts, config, monthlyIncomeTarget, riskAppetite, promptToUse)
       setRecommendations(recs)
     } catch (error) {
       console.error("Error generating recommendations:", error)
@@ -497,6 +507,48 @@ export function AIOptionRecommendations({ closedLegs, loading: parentLoading }: 
               <div className="font-medium capitalize">{riskAppetite.toLowerCase()}</div>
             </div>
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">Custom Prompt</label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!isPromptEditable && !customUserPrompt && defaultUserPrompt) {
+                  setCustomUserPrompt(defaultUserPrompt)
+                }
+                setIsPromptEditable(!isPromptEditable)
+              }}
+              className="gap-2"
+            >
+              {isPromptEditable ? (
+                <>
+                  <Lock className="h-3 w-3" />
+                  Lock Prompt
+                </>
+              ) : (
+                <>
+                  <Edit className="h-3 w-3" />
+                  Customize Prompt
+                </>
+              )}
+            </Button>
+          </div>
+          <Textarea
+            value={customUserPrompt}
+            onChange={(e) => setCustomUserPrompt(e.target.value)}
+            disabled={!isPromptEditable}
+            placeholder="Enter your custom prompt..."
+            className="min-h-[120px] font-mono text-sm"
+          />
+          {!isPromptEditable && (
+            <p className="text-xs text-muted-foreground">
+              Click "Customize Prompt" to modify the default prompt
+            </p>
+          )}
         </div>
 
         {recommendations.length > 0 && (

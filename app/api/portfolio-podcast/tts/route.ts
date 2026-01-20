@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
+import { OpenAIModel } from "@/lib/ai-chat-config"
 
 interface RequestBody {
   text: string
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     // Convert text to speech using OpenAI TTS
     const mp3 = await openai.audio.speech.create({
-      model: "gpt-4o-mini-tts",
+      model: OpenAIModel.GPT_4O_MINI_TTS,
       voice: voice as any,
       input: text,
       instructions: "Speak in a professional, engaging tone suitable for a financial news podcast. Use clear pronunciation and natural pacing."

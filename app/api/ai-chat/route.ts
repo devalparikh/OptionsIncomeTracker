@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
-import { calculateOpenAICost } from "@/lib/ai-chat-config"
+import { calculateOpenAICost, OpenAIModel, ModelConfig } from "@/lib/ai-chat-config"
 
 interface Message {
   id: string
@@ -240,9 +240,8 @@ export async function POST(request: NextRequest) {
     ]
 
     // If web search is enabled and the model supports it, use OpenAI tools
-    const WEB_SEARCH_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"];
     let openaiResponse
-    if (config.webSearchEnabled && WEB_SEARCH_MODELS.includes(config.model)) {
+    if (config.webSearchEnabled && ModelConfig.supportsWebSearch(config.model)) {
       const client = new OpenAI({ apiKey: config.apiKey })
       const contextInput = `${systemPrompt}\n\nPORTFOLIO DATA:\n${JSON.stringify(portfolioContext, null, 2)}\n\nUse this portfolio data to provide specific, relevant advice. Always reference actual positions and metrics when possible.\n\n${messages[messages.length - 1]?.content || ""}`
       openaiResponse = await client.responses.create({
@@ -295,7 +294,7 @@ export async function POST(request: NextRequest) {
     
     console.log("Full OpenAI response structure:", JSON.stringify(openaiResponse, null, 2))
     
-    if (config.webSearchEnabled && WEB_SEARCH_MODELS.includes(config.model)) {
+    if (config.webSearchEnabled && ModelConfig.supportsWebSearch(config.model)) {
       // For web search models, extract content and sources from the response structure
       if (openaiResponse.output && Array.isArray(openaiResponse.output)) {
         // Find the message content in the output array

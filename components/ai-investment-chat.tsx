@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch, estimateCost, OPENAI_PRICING } from "@/lib/ai-chat-config"
+import { AIChatConfig, DEFAULT_CONFIG, AVAILABLE_MODELS, TEMPERATURE_PRESETS, SYSTEM_PROMPT_VARIANTS, modelSupportsWebSearch, estimateCost, OPENAI_PRICING, OpenAIModel } from "@/lib/ai-chat-config"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -432,7 +432,7 @@ export function AIInvestmentChat({ portfolioData, loading }: AIChatProps) {
             size="icon"
             onClick={() => {
               if (!config.webSearchEnabled) {
-                setConfig(prev => ({ ...prev, webSearchEnabled: true, model: "gpt-4o" }))
+                setConfig(prev => ({ ...prev, webSearchEnabled: true, model: OpenAIModel.GPT_4O }))
               } else {
                 setConfig(prev => ({ ...prev, webSearchEnabled: false }))
               }

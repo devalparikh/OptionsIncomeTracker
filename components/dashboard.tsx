@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { StockTradesTable } from "./StockTradesTable"
 import { AIInvestmentChat } from "./ai-investment-chat"
 import { PortfolioPodcast } from "./portfolio-podcast"
+import { AIOptionRecommendations } from "./ai-option-recommendations"
 
 interface DashboardProps {
   onNewEntryRequest?: () => void
@@ -434,18 +435,47 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
     }, 0)
 
     // Calculate options realized PnL
+    // realized_pnl is already the total realized P&L for the leg (includes commissions)
+    // Formula: For SELL: (open_price * 100 * contracts) - (close_price * 100 * contracts) - commissions
+    //          For BUY: (close_price * 100 * contracts) - (open_price * 100 * contracts) - commissions
     const optionsRealizedPL = allClosedLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.realized_pnl, leg.contracts, 0)
-      const closePL = leg.close_price
-        ? (leg.side === "SELL" ? -1 : 1) * (leg.close_price - leg.open_price) * 100 * leg.contracts
-        : 0
-      return sum + premium + closePL
+      return sum + (leg.realized_pnl || 0)
     }, 0)
 
     // Calculate options unrealized PnL
+    // For sold options: premium received - current option value (commissions not included until realized)
+    // For bought options: current option value - premium paid (commissions not included until realized)
     const optionsUnrealizedPL = openLegs.reduce((sum, leg) => {
-      const premium = calculatePremiumIncome(leg.open_price * 100, leg.contracts, 0)
-      return sum + premium
+      const quote = stockQuotes.get(leg.symbol)
+      if (!quote) {
+        // If no quote available, cannot calculate unrealized P&L accurately
+        // Return 0 to avoid inflating the total
+        return sum + 0
+      }
+
+      // Estimate current option value (exact same logic as portfolio-calculations.ts)
+      const intrinsicValue =
+        leg.type === "PUT" ? Math.max(0, leg.strike - quote.price) : Math.max(0, quote.price - leg.strike)
+
+      const timeValue = Math.max(0, leg.open_price - intrinsicValue)
+      const daysToExpiry = Math.max(0, Math.ceil((leg.expiry.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))
+
+      // Simple time decay model
+      const timeDecayFactor = daysToExpiry > 0 ? Math.max(0.1, daysToExpiry / 30) : 0
+      const currentOptionValue = intrinsicValue + timeValue * timeDecayFactor
+      
+      const premiumPaidOrReceived = leg.open_price * 100 * leg.contracts
+      const currentPositionValue = currentOptionValue * 100 * leg.contracts
+      
+      // Unrealized P&L: 
+      // For SELL: premium received - current value we'd need to pay to buy back
+      // For BUY: current value - premium paid
+      // Note: Commissions are not included in unrealized P&L (only in realized)
+      const unrealizedPL = leg.side === "SELL" 
+        ? premiumPaidOrReceived - currentPositionValue
+        : currentPositionValue - premiumPaidOrReceived
+      
+      return sum + unrealizedPL
     }, 0)
 
     // Calculate stock realized PnL (from closed stock positions)
@@ -836,6 +866,8 @@ export function Dashboard({ onNewEntryRequest }: DashboardProps) {
               </CardContent>
             </Card>
           </div>
+
+          <AIOptionRecommendations closedLegs={allClosedLegs} loading={loading} />
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
             <div className="relative">

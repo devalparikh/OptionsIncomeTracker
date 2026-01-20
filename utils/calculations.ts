@@ -26,14 +26,9 @@ export function calculateMonthlyROI(netPL: number, collateral: number, daysInTra
   if (collateral <= 0 || daysInTrade <= 0) return 0
   const totalROI = (netPL / collateral) * 100
   
-  // If trade was less than 30 days, extrapolate to monthly
-  if (daysInTrade < 30) {
-    return totalROI * (30 / daysInTrade)
-  }
-  
-  // If trade was more than 30 days, annualize and then convert to monthly
-  const annualizedROI = totalROI * (365 / daysInTrade)
-  return annualizedROI / 12
+  // Extrapolate to monthly ROI based on a 30-day month
+  // This gives consistent results regardless of trade duration
+  return totalROI * (30 / daysInTrade)
 }
 
 export function calculateAnnualizedROI(roi: number, daysInTrade: number): number {
